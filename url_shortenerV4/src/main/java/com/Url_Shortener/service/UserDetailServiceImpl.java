@@ -1,8 +1,8 @@
-package com.url_shortenerV3.service;
+package com.Url_Shortener.service;
 
 
-import com.url_shortenerV3.entity.User;
-import com.url_shortenerV3.repository.UserRepository;
+import com.Url_Shortener.entity.User;
+import com.Url_Shortener.repository.UserRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.userdetails.UserDetails;

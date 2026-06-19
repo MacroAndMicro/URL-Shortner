@@ -1,4 +1,4 @@
-package com.url_shortenerV3.entity;
+package com.Url_Shortener.entity;
 
 import jakarta.persistence.*;
 
@@ -11,6 +11,7 @@ public class UrlMapping {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     private String originalUrl;
+    @Column(unique = true)
     private String shortUrl;
     private int clickCount = 0;
     private LocalDateTime createdDate;

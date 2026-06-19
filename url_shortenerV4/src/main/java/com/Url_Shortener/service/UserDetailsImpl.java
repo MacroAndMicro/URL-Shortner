@@ -1,6 +1,6 @@
-package com.url_shortenerV3.service;
+package com.Url_Shortener.service;
 
-import com.url_shortenerV3.entity.User;
+import com.Url_Shortener.entity.User;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import org.springframework.security.core.GrantedAuthority;

@@ -1,4 +1,4 @@
-package com.url_shortenerV3.security.jwt;
+package com.Url_Shortener.security.jwt;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

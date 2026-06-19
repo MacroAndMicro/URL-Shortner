@@ -1,11 +1,11 @@
-package com.url_shortenerV3.service;
+package com.Url_Shortener.service;
 
-import com.url_shortenerV3.dto.LoginRequestDto;
-import com.url_shortenerV3.dto.RegisterRequestDto;
-import com.url_shortenerV3.entity.User;
-import com.url_shortenerV3.repository.UserRepository;
-import com.url_shortenerV3.security.jwt.JwtAuthenticationResponse;
-import com.url_shortenerV3.security.jwt.JwtUtils;
+import com.Url_Shortener.dto.LoginRequestDto;
+import com.Url_Shortener.dto.RegisterRequestDto;
+import com.Url_Shortener.entity.User;
+import com.Url_Shortener.repository.UserRepository;
+import com.Url_Shortener.security.jwt.JwtAuthenticationResponse;
+import com.Url_Shortener.security.jwt.JwtUtils;
 import lombok.AllArgsConstructor;
 //import org.apache.tomcat.util.net.openssl.ciphers.Authentication;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -37,7 +37,17 @@ public class UserService {
 
     public User registerUser(RegisterRequestDto registerRequest){
         User user = new User();
+        if(userRepository.existsByUsername(registerRequest.getUsername()))
+        {
+            throw new RuntimeException("Username already exists");
+        }
+
+        if(userRepository.existsByEmail(registerRequest.getEmail()))
+        {
+            throw new RuntimeException("Email already exists");
+        }
         user.setUsername(registerRequest.getUsername());
+
         user.setEmail(registerRequest.getEmail());
         user.setPassword(passwordEncoder.encode(registerRequest.getPassword()));
         user.setRole("ROLE_USER");

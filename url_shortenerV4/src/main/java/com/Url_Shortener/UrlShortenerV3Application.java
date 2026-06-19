@@ -1,4 +1,4 @@
-package com.url_shortenerV3;
+package com.Url_Shortener;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

@@ -1,17 +1,19 @@
-package com.url_shortenerV3.service;
+package com.Url_Shortener.service;
 
-import com.url_shortenerV3.dto.ClickEventDto;
-import com.url_shortenerV3.dto.UrlMappingDto;
-import com.url_shortenerV3.entity.ClickEvent;
-import com.url_shortenerV3.entity.UrlMapping;
-import com.url_shortenerV3.entity.User;
-import com.url_shortenerV3.repository.ClickEventRepository;
-import com.url_shortenerV3.repository.UrlMappingRepository;
+import com.Url_Shortener.dto.ClickEventDto;
+import com.Url_Shortener.dto.UrlMappingDto;
+import com.Url_Shortener.entity.ClickEvent;
+import com.Url_Shortener.entity.UrlMapping;
+import com.Url_Shortener.entity.User;
+import com.Url_Shortener.repository.ClickEventRepository;
+import com.Url_Shortener.repository.UrlMappingRepository;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -48,12 +50,16 @@ public class UrlMappingService {
     private String generateShortUrl() {
         String characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
-        Random random = new Random();
+        SecureRandom random = new SecureRandom();
         StringBuilder shortUrl = new StringBuilder(8);
 
-        for (int i = 0; i < 8; i++) {
-            shortUrl.append(characters.charAt(random.nextInt(characters.length())));
+//        for (int i = 0; i < 8; i++) {
+//            shortUrl.append(characters.charAt(random.nextInt(characters.length())));
+//        }
+        do {
+            shortUrl = new StringBuilder(generateShortUrl());
         }
+        while(urlMappingRepository.existsByShortUrl(shortUrl));
         return shortUrl.toString();
     }
 
@@ -77,7 +83,7 @@ public class UrlMappingService {
                     })
                     .collect(Collectors.toList());
         }
-        return null;
+        return Collections.emptyList();
     }
 
     public Map<LocalDate, Long> getTotalClicksByUserAndDate(User user, LocalDate start, LocalDate end) {

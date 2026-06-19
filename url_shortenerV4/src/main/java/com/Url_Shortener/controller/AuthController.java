@@ -1,10 +1,10 @@
-package com.url_shortenerV3.controller;
+package com.Url_Shortener.controller;
 
-
-import com.url_shortenerV3.dto.LoginRequestDto;
-import com.url_shortenerV3.dto.RegisterRequestDto;
-import com.url_shortenerV3.entity.User;
-import com.url_shortenerV3.service.UserService;
+import com.Url_Shortener.dto.LoginRequestDto;
+import com.Url_Shortener.dto.RegisterRequestDto;
+import com.Url_Shortener.entity.User;
+import com.Url_Shortener.service.UserService;
+import lombok.AllArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -13,9 +13,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/auth")
-//@AllArgsConstructor
+@AllArgsConstructor
 public class AuthController {
-
      private UserService userService;
 
      @PostMapping("/public/login")

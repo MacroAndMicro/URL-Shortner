@@ -1,6 +1,6 @@
-package com.url_shortenerV3.security;
+package com.Url_Shortener.security;
 
-import com.url_shortenerV3.security.jwt.JwtAuthenticationFilter;
+import com.Url_Shortener.security.jwt.JwtAuthenticationFilter;
 import lombok.AllArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

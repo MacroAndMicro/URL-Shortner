@@ -1,6 +1,9 @@
-package com.url_shortenerV3.entity;
+package com.Url_Shortener.entity;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 import java.util.Formattable;
 
@@ -10,8 +13,18 @@ public class User  {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Email
     private String email;
+
+    @NotBlank
+    @Size(min = 5,max = 50)
+    @Column(unique = true, nullable = false)
     private String username;
+
+    @NotBlank
+    @Size(min = 8, max = 20)
+    @Column(unique = true, nullable = false)
     private String password;
     private String role = "ROLE_USER";
 

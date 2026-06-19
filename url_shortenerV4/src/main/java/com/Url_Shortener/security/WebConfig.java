@@ -1,4 +1,4 @@
-package com.url_shortenerV3.security;
+package com.Url_Shortener.security;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;

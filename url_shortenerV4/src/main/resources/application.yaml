@@ -1,6 +1,6 @@
 spring:
   application:
-    name: url_shortenerV3
+    name: Url_Shortener
 
   datasource:
     url: ${SPRING_DATASOURCE_URL}

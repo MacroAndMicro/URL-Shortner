@@ -1,4 +1,4 @@
-package com.url_shortenerV3.dto;
+package com.Url_Shortener.dto;
 
 import java.util.Set;
 

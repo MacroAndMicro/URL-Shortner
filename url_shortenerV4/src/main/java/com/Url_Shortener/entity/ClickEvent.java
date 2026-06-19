@@ -1,4 +1,4 @@
-package com.url_shortenerV3.entity;
+package com.Url_Shortener.entity;
 
 import jakarta.persistence.*;
 

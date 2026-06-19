@@ -1,7 +1,7 @@
-package com.url_shortenerV3.controller;
+package com.Url_Shortener.controller;
 
-import com.url_shortenerV3.entity.UrlMapping;
-import com.url_shortenerV3.service.UrlMappingService;
+import com.Url_Shortener.entity.UrlMapping;
+import com.Url_Shortener.service.UrlMappingService;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
@@ -10,8 +10,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@AllArgsConstructor
+//@AllArgsConstructor
 public class RedirectController {
+
     private UrlMappingService urlMappingService;
 
     @GetMapping("/{shortUrl}")

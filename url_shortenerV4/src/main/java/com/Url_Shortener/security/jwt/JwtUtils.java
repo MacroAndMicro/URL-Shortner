@@ -1,6 +1,6 @@
-package com.url_shortenerV3.security.jwt;
+package com.Url_Shortener.security.jwt;
 
-import com.url_shortenerV3.service.UserDetailsImpl;
+import com.Url_Shortener.service.UserDetailsImpl;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -62,7 +62,7 @@ public class JwtUtils {
                     .build().parseSignedClaims(authToken);
             return true;
         } catch (JwtException e) {
-            throw new RuntimeException(e);
+            return false;
         } catch (IllegalArgumentException e) {
             throw new RuntimeException(e);
         } catch (Exception e) {

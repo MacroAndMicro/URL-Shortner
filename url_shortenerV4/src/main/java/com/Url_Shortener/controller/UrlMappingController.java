@@ -1,10 +1,10 @@
-package com.url_shortenerV3.controller;
+package com.Url_Shortener.controller;
 
-import com.url_shortenerV3.dto.ClickEventDto;
-import com.url_shortenerV3.dto.UrlMappingDto;
-import com.url_shortenerV3.entity.User;
-import com.url_shortenerV3.service.UrlMappingService;
-import com.url_shortenerV3.service.UserService;
+import com.Url_Shortener.dto.ClickEventDto;
+import com.Url_Shortener.dto.UrlMappingDto;
+import com.Url_Shortener.entity.User;
+import com.Url_Shortener.service.UrlMappingService;
+import com.Url_Shortener.service.UserService;
 import lombok.AllArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;

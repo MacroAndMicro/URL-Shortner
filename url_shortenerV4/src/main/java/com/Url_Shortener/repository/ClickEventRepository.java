@@ -1,7 +1,7 @@
-package com.url_shortenerV3.repository;
+package com.Url_Shortener.repository;
 
-import com.url_shortenerV3.entity.ClickEvent;
-import com.url_shortenerV3.entity.UrlMapping;
+import com.Url_Shortener.entity.ClickEvent;
+import com.Url_Shortener.entity.UrlMapping;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
