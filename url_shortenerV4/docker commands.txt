@@ -1,0 +1,22 @@
+docker compose up --build
+docker compose up
+docker compose down
+docker stop $(docker ps -q): to stop all services
+docker container prune : to remove all stopped containers
+docker ps : to list all running containers
+docker ps -a : to list all containers (running and stopped)
+docker images : to list all Docker images
+docker rmi <image_id> : to remove a specific Docker image
+docker rmi $(docker images -q) : to remove all Docker images
+docker logs <container_id> : to view the logs of a specific container
+docker exec -it <container_id> bash : to access the shell of a running container
+docker build -t <image_name> . : to build a Docker image from a Dockerfile
+docker run -d -p <host_port>:<container_port> <image_name> : to run a Docker container in detached mode and map ports
+docker compose logs : to view the logs of all services in a Docker Compose setup
+docker compose logs <service_name> : to view the logs of a specific service in a Docker Compose setup
+docker compose ps : to list the status of all services in a Docker Compose setup
+docker compose down : to stop and remove all services in a Docker Compose setup
+docker compose up -d : to start all services in a Docker Compose setup in detached mode
+docker compose build : to build or rebuild services in a Docker Compose setup
+docker compose restart : to restart all services in a Docker Compose setup
+docker compose stop : to stop all services in a Docker Compose setup
