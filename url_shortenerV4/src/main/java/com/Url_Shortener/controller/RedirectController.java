@@ -2,7 +2,7 @@ package com.Url_Shortener.controller;
 
 import com.Url_Shortener.entity.UrlMapping;
 import com.Url_Shortener.service.UrlMappingService;
-import lombok.AllArgsConstructor;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -10,14 +10,23 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-//@AllArgsConstructor
 public class RedirectController {
 
-    private UrlMappingService urlMappingService;
+    private final UrlMappingService urlMappingService;
+
+    public RedirectController(UrlMappingService urlMappingService) {
+        this.urlMappingService = urlMappingService;
+    }
 
     @GetMapping("/{shortUrl}")
-    public ResponseEntity<Void> redirect(@PathVariable String shortUrl){
-        UrlMapping urlMapping = urlMappingService.getOriginalUrl(shortUrl);
+    public ResponseEntity<Void> redirect(@PathVariable String shortUrl,
+                                          HttpServletRequest request){
+        UrlMapping urlMapping = urlMappingService.getOriginalUrl(
+                shortUrl,
+                request.getRemoteAddr(),
+                request.getHeader("Referer"),
+                request.getHeader("User-Agent")
+        );
         if (urlMapping != null) {
             HttpHeaders httpHeaders = new HttpHeaders();
             httpHeaders.add("Location", urlMapping.getOriginalUrl());

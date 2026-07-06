@@ -8,7 +8,6 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.security.Keys;
 import io.jsonwebtoken.io.Decoders;
-
 import javax.crypto.SecretKey;
 import java.security.Key;
 import java.util.Date;

@@ -1,11 +1,14 @@
 package com.Url_Shortener.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
-import java.util.Formattable;
+import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "users")
@@ -15,6 +18,7 @@ public class User  {
     private Long id;
 
     @Email
+    @Column(unique = true, nullable = false)
     private String email;
 
     @NotBlank
@@ -23,10 +27,22 @@ public class User  {
     private String username;
 
     @NotBlank
-    @Size(min = 8, max = 20)
-    @Column(unique = true, nullable = false)
+    @Size(min = 8, max = 100)
+    @Column(nullable = false)
+    @JsonIgnore
     private String password;
-    private String role = "ROLE_USER";
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(
+            name = "user_roles",
+            joinColumns = @JoinColumn(name = "user_id")
+    )
+    @Column(name = "role")
+    private Set<String> roles = new HashSet<>();
+
+    private LocalDateTime createdDate = LocalDateTime.now();
+
+   // private String role = "ROLE_USER";
 
     public Long getId() {
         return id;
@@ -60,11 +76,19 @@ public class User  {
         this.password = password;
     }
 
-    public String getRole() {
-        return role;
+    public Set<String> getRoles() {
+        return roles;
     }
 
-    public void setRole(String role) {
-        this.role = role;
+    public void setRoles(Set<String> roles) {
+        this.roles = roles;
+    }
+
+    public LocalDateTime getCreatedDate() {
+        return createdDate;
+    }
+
+    public void setCreatedDate(LocalDateTime createdDate) {
+        this.createdDate = createdDate;
     }
 }

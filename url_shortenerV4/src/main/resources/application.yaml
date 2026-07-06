@@ -3,9 +3,9 @@ spring:
     name: Url_Shortener
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL}
-    username: ${SPRING_DATASOURCE_USERNAME}
-    password: ${SPRING_DATASOURCE_PASSWORD}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/urlshortener}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:postgres123}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -19,8 +19,15 @@ spring:
         format_sql: true
 
 jwt:
-  secret: mySuperSecretKeyForJwtGeneration123456789
+  secret: ${JWT_SECRET:gcowAfycBs76wnCP7cvO6xe5Qtq2hZWd2k++abz5ub0=}
   expiration: 86400000
+  refresh-expiration: 604800000
 
-#frontend:
-#  url: http://localhost:3000
+frontend:
+  url: ${FRONTEND_URL:http://localhost:4200}
+
+server:
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true

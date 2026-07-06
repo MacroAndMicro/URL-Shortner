@@ -1,17 +1,12 @@
 package com.Url_Shortener.service;
 
 import com.Url_Shortener.entity.User;
-import lombok.AllArgsConstructor;
-import lombok.Data;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-//import org.springframework.security.core.userdetails.User;
-
 import org.springframework.security.core.userdetails.UserDetails;
 
 import java.util.Collection;
-import java.util.Collections;
-@Data
+import java.util.List;
 
 public class UserDetailsImpl implements UserDetails {
     private static final long serialVersionUID = 1L;
@@ -33,13 +28,23 @@ public class UserDetailsImpl implements UserDetails {
     }
 
     public static UserDetailsImpl build(User user) {
-        GrantedAuthority authority = new SimpleGrantedAuthority(user.getRole());
+        List<GrantedAuthority> authorities = user.getRoles()
+                .stream()
+                .<GrantedAuthority>map(SimpleGrantedAuthority::new)
+                .toList();
+
+//        return new User(
+//                user.getUsername(),
+//                user.getPassword(),
+//                authorities
+//        );
         return new UserDetailsImpl(
                 user.getId(),
                 user.getUsername(),
                 user.getEmail(),
                 user.getPassword(),
-                Collections.singletonList(authority)
+                authorities
+                //Collections.singletonList(authority)
         );
     }
 

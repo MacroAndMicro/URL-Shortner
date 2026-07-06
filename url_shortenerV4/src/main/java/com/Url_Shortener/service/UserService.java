@@ -2,12 +2,12 @@ package com.Url_Shortener.service;
 
 import com.Url_Shortener.dto.LoginRequestDto;
 import com.Url_Shortener.dto.RegisterRequestDto;
+import com.Url_Shortener.dto.UserProfileDto;
+import com.Url_Shortener.entity.RefreshToken;
 import com.Url_Shortener.entity.User;
 import com.Url_Shortener.repository.UserRepository;
 import com.Url_Shortener.security.jwt.JwtAuthenticationResponse;
 import com.Url_Shortener.security.jwt.JwtUtils;
-import lombok.AllArgsConstructor;
-//import org.apache.tomcat.util.net.openssl.ciphers.Authentication;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -16,13 +16,25 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.util.Set;
+
 @Service
-@AllArgsConstructor
 public class UserService {
-    private PasswordEncoder passwordEncoder;
-    private UserRepository userRepository;
-    private AuthenticationManager authenticationManager;
-    private JwtUtils jwtUtils;
+    private final PasswordEncoder passwordEncoder;
+    private final UserRepository userRepository;
+    private final AuthenticationManager authenticationManager;
+    private final JwtUtils jwtUtils;
+    private final RefreshTokenService refreshTokenService;
+
+    public UserService(PasswordEncoder passwordEncoder, UserRepository userRepository,
+                       AuthenticationManager authenticationManager, JwtUtils jwtUtils,
+                       RefreshTokenService refreshTokenService) {
+        this.passwordEncoder = passwordEncoder;
+        this.userRepository = userRepository;
+        this.authenticationManager = authenticationManager;
+        this.jwtUtils = jwtUtils;
+        this.refreshTokenService = refreshTokenService;
+    }
 
     public JwtAuthenticationResponse authenticateUser(LoginRequestDto loginRequest){
         Authentication authentication = authenticationManager.authenticate(
@@ -31,7 +43,8 @@ public class UserService {
         SecurityContextHolder.getContext().setAuthentication(authentication);
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
         String jwt = jwtUtils.generateToken(userDetails);
-        return new JwtAuthenticationResponse(jwt);
+        String refreshToken = refreshTokenService.createRefreshToken(userDetails.getUsername()).getToken();
+        return new JwtAuthenticationResponse(jwt, refreshToken);
     }
 
 
@@ -50,7 +63,8 @@ public class UserService {
 
         user.setEmail(registerRequest.getEmail());
         user.setPassword(passwordEncoder.encode(registerRequest.getPassword()));
-        user.setRole("ROLE_USER");
+
+        user.setRoles(Set.of("ROLE_USER"));
         return userRepository.save(user);
     }
 
@@ -60,5 +74,28 @@ public class UserService {
         return userRepository.findByUsername(name).orElseThrow(
                 () -> new UsernameNotFoundException("User not found with username: " + name)
         );
+    }
+
+    public UserProfileDto getUserProfile(String username) {
+        User user = findByUsername(username);
+        return new UserProfileDto(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getRoles(),
+                user.getCreatedDate()
+        );
+    }
+
+    public JwtAuthenticationResponse refreshToken(String refreshTokenValue) {
+        RefreshToken newRefreshToken = refreshTokenService.verifyAndRotate(refreshTokenValue);
+        User user = newRefreshToken.getUser();
+        UserDetailsImpl userDetails = UserDetailsImpl.build(user);
+        String jwt = jwtUtils.generateToken(userDetails);
+        return new JwtAuthenticationResponse(jwt, newRefreshToken.getToken());
+    }
+
+    public void logout(String username) {
+        refreshTokenService.deleteByUsername(username);
     }
 }

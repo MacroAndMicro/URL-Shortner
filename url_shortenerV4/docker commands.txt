@@ -1,3 +1,30 @@
+============================================================
+LOCAL DEVELOPMENT (NO DOCKER APP)
+============================================================
+Prerequisites: PostgreSQL running on localhost:5432
+  Database: urlshortener | User: postgres | Password: postgres123
+
+Run the app locally (IDE or CLI):
+  ./mvnw spring-boot:run
+  ./mvnw spring-boot:run -Dspring-boot.run.profiles=local   (explicit local profile)
+
+Or run the JAR directly:
+  ./mvnw clean package -DskipTests
+  java -jar target/Url_Shortener-0.0.1-SNAPSHOT.jar
+
+============================================================
+HYBRID MODE (Docker-only PostgreSQL + Local App)
+============================================================
+Run just the PostgreSQL container, then run the app locally:
+  docker compose up postgres -d
+  ./mvnw spring-boot:run
+
+Stop PostgreSQL when done:
+  docker compose down
+
+============================================================
+FULL DOCKER MODE
+============================================================
 docker compose up --build
 docker compose up
 docker compose down

@@ -7,17 +7,15 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Component
 public class WebConfig implements WebMvcConfigurer {
-//    @Value("${frontend.url}")
-//    String frontEndUrl;
+    @Value("${frontend.url:http://localhost:3000}")
+    private String frontEndUrl;
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
-                .allowedOriginPatterns("*")
-              //  .allowedOrigins(frontEndUrl)
-                .allowedMethods("GET","POST","PUT","DELETE","OPTIONS")
+                .allowedOrigins(frontEndUrl)
+                .allowedMethods("GET","POST","PUT","PATCH","DELETE","OPTIONS")
                 .allowedHeaders("*")
-               // .allowCredentials(true)
-        ;
+                .allowCredentials(true);
     }
 }

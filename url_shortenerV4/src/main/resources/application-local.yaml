@@ -1,0 +1,23 @@
+# ============================================================
+# Local Development Profile
+# Run with: --spring.profiles.active=local
+# Or set in IDE: spring.profiles.active=local
+# ============================================================
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/urlshortener
+    username: postgres
+    password: postgres123
+
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+# Debug logging for local development
+logging:
+  level:
+    com.Url_Shortener: DEBUG
+    org.springframework.security: DEBUG
