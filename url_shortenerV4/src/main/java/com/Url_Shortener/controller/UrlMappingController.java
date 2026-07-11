@@ -40,7 +40,7 @@ public class UrlMappingController {
 //    https://abc.com/QN7XOa0a --> https://example.com
 
     @PostMapping("/shorten")
-    @PreAuthorize("hasRole('USER')")
+    @PreAuthorize("hasRole('USER')")  //✅
     public ResponseEntity<ApiResponse<UrlMappingDto>> createShortUrl(@Valid @RequestBody CreateShortUrlRequest request,
                                                                       Principal principal){
         User user = userService.findByUsername(principal.getName());
@@ -50,7 +50,7 @@ public class UrlMappingController {
 
 
     @GetMapping("/myurls")
-    @PreAuthorize("hasRole('USER')")
+    @PreAuthorize("hasRole('USER')")  //✅
     public ResponseEntity<ApiResponse<Page<UrlMappingDto>>> getUserUrls(
             Principal principal,
             @PageableDefault(size = 20, sort = "createdDate") Pageable pageable){
@@ -60,9 +60,9 @@ public class UrlMappingController {
     }
 
 
-    @GetMapping("/analytics/{shortUrl}")
+    @GetMapping("/analytics")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<List<ClickEventDto>>> getUrlAnalytics(@PathVariable String shortUrl,
+    public ResponseEntity<ApiResponse<List<ClickEventDto>>> getUrlAnalytics(@RequestParam("shortUrl") String shortUrl,
                                                                              @RequestParam("startDate") String startDate,
                                                                              @RequestParam("endDate") String endDate,
                                                                              Principal principal){

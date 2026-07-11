@@ -23,25 +23,25 @@ public class AuthController {
          this.userService = userService;
      }
 
-     @PostMapping("/public/login")
+     @PostMapping("/public/login") //✅
      public ResponseEntity<ApiResponse<?>> loginUser(@Valid @RequestBody LoginRequestDto loginRequest){
          return ResponseEntity.ok(ApiResponse.success(userService.authenticateUser(loginRequest)));
      }
 
-     @PostMapping("/public/register")
+     @PostMapping("/public/register") //✅
      public ResponseEntity<ApiResponse<?>> registerUser(@Valid @RequestBody RegisterRequestDto registerRequest){
          userService.registerUser(registerRequest);
          return ResponseEntity.ok(ApiResponse.success(null, "User registered successfully"));
      }
 
-     @GetMapping("/me")
+     @GetMapping("/me")  //✅
      @PreAuthorize("hasRole('USER')")
      public ResponseEntity<ApiResponse<UserProfileDto>> getCurrentUser(Principal principal){
          UserProfileDto profile = userService.getUserProfile(principal.getName());
          return ResponseEntity.ok(ApiResponse.success(profile));
      }
 
-     @PostMapping("/public/refresh")
+     @PostMapping("/public/refresh") //✅
      public ResponseEntity<ApiResponse<JwtAuthenticationResponse>> refreshToken(
              @Valid @RequestBody RefreshTokenRequest request){
          return ResponseEntity.ok(ApiResponse.success(userService.refreshToken(request.getRefreshToken())));
