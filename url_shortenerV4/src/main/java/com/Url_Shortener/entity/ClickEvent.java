@@ -16,9 +16,14 @@ public class ClickEvent {
     @Column(columnDefinition = "TEXT")
     private String userAgent;
 
-    @ManyToOne
-    @JoinColumn(name = "url_mapping_id")
-    private UrlMapping urlMapping;
+    // ============================================================
+    // POLYGLOT PERSISTENCE MIGRATION:
+    // Changed from @ManyToOne UrlMapping to String shortUrl because
+    // URL mappings are now stored in DynamoDB, not PostgreSQL.
+    // The shortUrl field acts as the cross-database join key.
+    // ============================================================
+    @Column(name = "short_url")
+    private String shortUrl;
 
     public Long getId() {
         return id;
@@ -36,12 +41,17 @@ public class ClickEvent {
         this.clickDate = clickDate;
     }
 
-    public UrlMapping getUrlMapping() {
-        return urlMapping;
+    // OLD POSTGRES IMPLEMENTATION
+    // public UrlMapping getUrlMapping() { return urlMapping; }
+    // public void setUrlMapping(UrlMapping urlMapping) { this.urlMapping = urlMapping; }
+
+    // NEW DYNAMODB IMPLEMENTATION — using shortUrl as cross-database key
+    public String getShortUrl() {
+        return shortUrl;
     }
 
-    public void setUrlMapping(UrlMapping urlMapping) {
-        this.urlMapping = urlMapping;
+    public void setShortUrl(String shortUrl) {
+        this.shortUrl = shortUrl;
     }
 
     public String getIpAddress() {

@@ -31,3 +31,11 @@ server:
     encoding:
       charset: UTF-8
       force: true
+
+# ============================================================
+# POLYGLOT PERSISTENCE: DynamoDB Configuration
+# ============================================================
+dynamodb:
+  endpoint: ${DYNAMODB_ENDPOINT:http://127.0.0.1:8000}
+  region: ${AWS_REGION:us-east-1}
+  table-name: ${DYNAMODB_TABLE_NAME:url_mappings}

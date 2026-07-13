@@ -10,13 +10,20 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Optional;
 
-@Repository
-public interface UrlMappingRepository extends JpaRepository<UrlMapping, Long> {
-    UrlMapping findByShortUrl(String shortUrl);
-    UrlMapping findByShortUrlAndUser(String shortUrl, User user);
-    List<UrlMapping> findByUser(User user);
-    Page<UrlMapping> findByUser(User user, Pageable pageable);
-    Optional<UrlMapping> findByIdAndUser(Long id, User user);
-    boolean existsByShortUrl(String shortUrl);
-    boolean existsByOriginalUrlAndUser(String originalUrl, User user);
-}
+// ============================================================
+// OLD POSTGRES IMPLEMENTATION — Commented out for DynamoDB migration
+// ============================================================
+// This JPA repository has been replaced by UrlMappingDynamoRepository.
+// Kept for reference during the polyglot persistence migration.
+// ============================================================
+
+//@Repository
+//public interface UrlMappingRepository extends JpaRepository<UrlMapping, Long> {
+//    UrlMapping findByShortUrl(String shortUrl);
+//    UrlMapping findByShortUrlAndUser(String shortUrl, User user);
+//    List<UrlMapping> findByUser(User user);
+//    Page<UrlMapping> findByUser(User user, Pageable pageable);
+//    Optional<UrlMapping> findByIdAndUser(Long id, User user);
+//    boolean existsByShortUrl(String shortUrl);
+//    boolean existsByOriginalUrlAndUser(String originalUrl, User user);
+//}

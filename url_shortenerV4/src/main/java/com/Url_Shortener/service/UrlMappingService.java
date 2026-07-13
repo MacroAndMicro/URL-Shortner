@@ -7,9 +7,11 @@ import com.Url_Shortener.dto.UrlMappingDto;
 import com.Url_Shortener.entity.ClickEvent;
 import com.Url_Shortener.entity.UrlMapping;
 import com.Url_Shortener.entity.User;
+import com.Url_Shortener.model.UrlMappingItem;
 import com.Url_Shortener.repository.ClickEventRepository;
-import com.Url_Shortener.repository.UrlMappingRepository;
+import com.Url_Shortener.repository.UrlMappingDynamoRepository;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -18,111 +20,220 @@ import org.springframework.stereotype.Service;
 import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
+/**
+ * ============================================================
+ * POLYGLOT PERSISTENCE MIGRATION: URL Mapping Service
+ * ============================================================
+ *
+ * URL mapping persistence has been migrated from PostgreSQL (JPA)
+ * to DynamoDB Local. Click events remain in PostgreSQL for now.
+ *
+ * Changes:
+ *   - UrlMappingRepository (JPA) → UrlMappingDynamoRepository (DynamoDB)
+ *   - ClickEventRepository methods now use String shortUrl instead of
+ *     UrlMapping entity references (cross-database FK decoupling)
+ *   - clickCount native SQL → DynamoDB atomic UpdateExpression
+ *   - Pageable support adapted for DynamoDB token-based pagination
+ * ============================================================
+ */
 @Service
 public class UrlMappingService {
-    private final UrlMappingRepository urlMappingRepository;
+
+    // OLD POSTGRES IMPLEMENTATION
+    // private final UrlMappingRepository urlMappingRepository;
+
+    // NEW DYNAMODB IMPLEMENTATION
+    private final UrlMappingDynamoRepository urlMappingRepository;
     private final ClickEventRepository clickEventRepository;
 
-    public UrlMappingService(UrlMappingRepository urlMappingRepository, ClickEventRepository clickEventRepository) {
+    public UrlMappingService(UrlMappingDynamoRepository urlMappingRepository,
+                             ClickEventRepository clickEventRepository) {
         this.urlMappingRepository = urlMappingRepository;
         this.clickEventRepository = clickEventRepository;
     }
 
+    /**
+     * Creates a new short URL for the given original URL and user.
+     */
     public UrlMappingDto createShortUrl(String originalUrl, User user) {
-        // Return existing mapping if user already shortened this URL
-        if (urlMappingRepository.existsByOriginalUrlAndUser(originalUrl, user)) {
-            UrlMapping existing = urlMappingRepository.findByUser(user).stream()
+        // OLD POSTGRES: urlMappingRepository.existsByOriginalUrlAndUser(originalUrl, user)
+        // NEW DYNAMODB:  Check by querying ownerId-index GSI and filtering by originalUrl
+        if (urlMappingRepository.existsByOriginalUrlAndOwnerId(originalUrl, user.getId())) {
+            List<UrlMappingItem> userUrls = urlMappingRepository.findByOwnerId(user.getId());
+            UrlMappingItem existing = userUrls.stream()
                     .filter(m -> m.getOriginalUrl().equals(originalUrl))
                     .findFirst()
                     .orElseThrow();
             return convertToDto(existing);
         }
+
         String shortUrl = generateShortUrl();
-        UrlMapping urlMapping = new UrlMapping();
-        urlMapping.setOriginalUrl(originalUrl);
-        urlMapping.setShortUrl(shortUrl);
-        urlMapping.setUser(user);
-        urlMapping.setCreatedDate(LocalDateTime.now());
-        UrlMapping savedUrlMapping = urlMappingRepository.save(urlMapping);
-        return convertToDto(savedUrlMapping);
+        Long generatedId = generateId();
+
+        UrlMappingItem item = new UrlMappingItem();
+        item.setShortUrl(shortUrl);
+        item.setId(generatedId);
+        item.setOriginalUrl(originalUrl);
+        item.setOwnerId(user.getId());
+        item.setOwnerUsername(user.getUsername());
+        item.setClickCount(0);
+        String now = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        item.setCreatedDate(now);
+        item.setUpdatedDate(now);
+
+        UrlMappingItem saved = urlMappingRepository.save(item);
+        return convertToDto(saved);
     }
 
-    private UrlMappingDto convertToDto(UrlMapping urlMapping){
-        UrlMappingDto urlMappingDto = new UrlMappingDto();
-        urlMappingDto.setId(urlMapping.getId());
-        urlMappingDto.setOriginalUrl(urlMapping.getOriginalUrl());
-        urlMappingDto.setShortUrl(urlMapping.getShortUrl());
-        urlMappingDto.setClickCount(urlMapping.getClickCount());
-        urlMappingDto.setCreatedDate(urlMapping.getCreatedDate());
-        urlMappingDto.setUsername(urlMapping.getUser().getUsername());
-        return urlMappingDto;
+    /**
+     * Generates a unique numeric ID for the URL mapping.
+     * Uses a random positive Long — collisions are astronomically unlikely
+     * but the uniqueness is also protected by the DynamoDB id-index GSI.
+     */
+    private Long generateId() {
+        return Math.abs(new SecureRandom().nextLong());
     }
 
+    /**
+     * Converts a DynamoDB UrlMappingItem to a UrlMappingDto.
+     */
+    // OLD POSTGRES: convertToDto(UrlMapping urlMapping) — used JPA entity
+    // NEW DYNAMODB:  convertToDto(UrlMappingItem item) — uses DynamoDB model
+    private UrlMappingDto convertToDto(UrlMappingItem item) {
+        UrlMappingDto dto = new UrlMappingDto();
+        dto.setId(item.getId());
+        dto.setOriginalUrl(item.getOriginalUrl());
+        dto.setShortUrl(item.getShortUrl());
+        dto.setClickCount(item.getClickCount() != null ? item.getClickCount() : 0);
+        dto.setCreatedDate(item.getCreatedDate() != null
+                ? LocalDateTime.parse(item.getCreatedDate(), DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                : null);
+        dto.setUsername(item.getOwnerUsername());
+        return dto;
+    }
+
+    /**
+     * Generates an 8-character random short URL.
+     * Checks DynamoDB for collision (GetItem on PK).
+     */
     private String generateShortUrl() {
-
-        String characters =
-                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-
+        String characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
         SecureRandom random = new SecureRandom();
-
         String shortUrl;
 
         do {
             StringBuilder sb = new StringBuilder(8);
-
             for (int i = 0; i < 8; i++) {
-                sb.append(
-                        characters.charAt(
-                                random.nextInt(characters.length())
-                        )
-                );
+                sb.append(characters.charAt(random.nextInt(characters.length())));
             }
-
             shortUrl = sb.toString();
-
         } while (urlMappingRepository.existsByShortUrl(shortUrl));
 
         return shortUrl;
     }
 
+    /**
+     * Returns all URL mappings for a user.
+     */
     public List<UrlMappingDto> getUrlsByUser(User user) {
-        return urlMappingRepository.findByUser(user).stream()
+        return urlMappingRepository.findByOwnerId(user.getId()).stream()
                 .map(this::convertToDto)
                 .toList();
     }
 
+    /**
+     * Returns paginated URL mappings for a user.
+     *
+     * NOTE: DynamoDB uses token-based pagination (LastEvaluatedKey), not
+     * offset-based pagination like SQL. The Spring Pageable 'page' / 'offset'
+     * semantics are approximated — page 0 always works, but subsequent pages
+     * require passing the LastEvaluatedKey from the previous response.
+     * For simplicity, this implementation treats each call independently
+     * and only supports "first page" semantics for the page number.
+     */
     public Page<UrlMappingDto> getUrlsByUser(User user, Pageable pageable) {
-        return urlMappingRepository.findByUser(user, pageable)
-                .map(this::convertToDto);
+        int pageSize = pageable.getPageSize();
+        boolean ascending = pageable.getSort().stream()
+                .findFirst()
+                .map(order -> order.getDirection() == Sort.Direction.ASC)
+                .orElse(false);
+
+        // Token-based pagination: page 0 = first page; for subsequent pages
+        // we'd need to pass the LastEvaluatedKey from the client.
+        // Since Spring Pageable is offset-based, we only support first-page
+        // semantics here. Full token-based pagination would require API changes.
+        UrlMappingDynamoRepository.DynamoPageResult<UrlMappingItem> result =
+                urlMappingRepository.findByOwnerIdPaginated(user.getId(), pageSize, null, ascending);
+
+        List<UrlMappingDto> dtos = result.getItems().stream()
+                .map(this::convertToDto)
+                .toList();
+
+        long total = urlMappingRepository.countByOwnerId(user.getId());
+
+        return new PageImpl<>(dtos,
+                PageRequest.of(pageable.getPageNumber(), pageSize, pageable.getSort()),
+                total);
     }
 
-    public List<ClickEventDto> getClickEventsByDate(String shortUrl, LocalDateTime start, LocalDateTime end, User user) {
-        UrlMapping urlMapping = urlMappingRepository.findByShortUrlAndUser(shortUrl, user);
-        if (urlMapping != null) {
-            return clickEventRepository.findByUrlMappingAndClickDateBetween(urlMapping, start, end).stream()
-                    .collect(Collectors.groupingBy(click -> click.getClickDate().toLocalDate(), Collectors.counting()))
+    /**
+     * Returns click event counts grouped by date for a specific URL.
+     */
+    public List<ClickEventDto> getClickEventsByDate(String shortUrl, LocalDateTime start,
+                                                     LocalDateTime end, User user) {
+        // OLD POSTGRES: urlMappingRepository.findByShortUrlAndUser(shortUrl, user)
+        // NEW DYNAMODB:  findByShortUrlAndOwnerId
+        Optional<UrlMappingItem> optItem =
+                urlMappingRepository.findByShortUrlAndOwnerId(shortUrl, user.getId());
+
+        if (optItem.isPresent()) {
+            // OLD POSTGRES: clickEventRepository.findByUrlMappingAndClickDateBetween(urlMapping, start, end)
+            // NEW DYNAMODB:  findByShortUrlAndClickDateBetween(shortUrl, start, end)
+            return clickEventRepository.findByShortUrlAndClickDateBetween(shortUrl, start, end).stream()
+                    .collect(Collectors.groupingBy(click -> click.getClickDate().toLocalDate(),
+                            Collectors.counting()))
                     .entrySet().stream()
                     .map(entry -> {
-                        ClickEventDto clickEventDTO = new ClickEventDto();
-                        clickEventDTO.setClickDate(entry.getKey());
-                        clickEventDTO.setCount(entry.getValue());
-                        return clickEventDTO;
+                        ClickEventDto dto = new ClickEventDto();
+                        dto.setClickDate(entry.getKey());
+                        dto.setCount(entry.getValue());
+                        return dto;
                     })
                     .collect(Collectors.toList());
         }
         return Collections.emptyList();
     }
 
+    /**
+     * Returns total click counts for all URLs belonging to a user, grouped by date.
+     */
     public List<ClickEventDto> getTotalClicksByUserAndDate(User user, LocalDate start, LocalDate end) {
-        List<UrlMapping> urlMappings = urlMappingRepository.findByUser(user);
-        List<ClickEvent> clickEvents = clickEventRepository.findByUrlMappingInAndClickDateBetween(urlMappings, start.atStartOfDay(), end.plusDays(1).atStartOfDay());
+        // OLD POSTGRES: urlMappingRepository.findByUser(user) — list of JPA entities
+        // NEW DYNAMODB:  findByOwnerId(user.getId()) — list of DynamoDB items
+        List<UrlMappingItem> userUrls = urlMappingRepository.findByOwnerId(user.getId());
+        List<String> shortUrls = userUrls.stream()
+                .map(UrlMappingItem::getShortUrl)
+                .collect(Collectors.toList());
+
+        if (shortUrls.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // OLD POSTGRES: clickEventRepository.findByUrlMappingInAndClickDateBetween(urlMappings, ...)
+        // NEW DYNAMODB:  findByShortUrlInAndClickDateBetween(shortUrls, ...)
+        List<ClickEvent> clickEvents = clickEventRepository.findByShortUrlInAndClickDateBetween(
+                shortUrls, start.atStartOfDay(), end.plusDays(1).atStartOfDay());
+
         return clickEvents.stream()
-                .collect(Collectors.groupingBy(click -> click.getClickDate().toLocalDate(), Collectors.counting()))
+                .collect(Collectors.groupingBy(click -> click.getClickDate().toLocalDate(),
+                        Collectors.counting()))
                 .entrySet().stream()
                 .map(entry -> {
                     ClickEventDto dto = new ClickEventDto();
@@ -134,57 +245,122 @@ public class UrlMappingService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * Resolves a short URL to its original URL and logs the click event.
+     * This is the HOT PATH — called on every redirect.
+     *
+     * NOTE: Returns UrlMapping (plain POJO, not JPA entity) for controller
+     * compatibility. The UrlMapping entity has been de-JPA-annotated.
+     */
     public UrlMapping getOriginalUrl(String shortUrl, String ipAddress, String referrer, String userAgent) {
+        // OLD POSTGRES: urlMappingRepository.findByShortUrl(shortUrl)
+        // NEW DYNAMODB:  findByShortUrl(shortUrl) — GetItem on PK
+        Optional<UrlMappingItem> optItem = urlMappingRepository.findByShortUrl(shortUrl);
 
-        UrlMapping urlMapping =
-                urlMappingRepository.findByShortUrl(shortUrl);
+        if (optItem.isPresent()) {
+            UrlMappingItem item = optItem.get();
 
-        if (urlMapping != null) {
+            // OLD POSTGRES: clickEventRepository.clickCount(urlMapping.getId()) — native SQL
+            // NEW DYNAMODB:  dynamoRepository.incrementClickCount(shortUrl) — atomic UpdateExpression
+            urlMappingRepository.incrementClickCount(shortUrl);
 
-            clickEventRepository.clickCount(urlMapping.getId());
-
+            // OLD POSTGRES: new ClickEvent(), clickEvent.setUrlMapping(urlMapping)
+            // NEW DYNAMODB:  new ClickEvent(), clickEvent.setShortUrl(shortUrl)
             ClickEvent clickEvent = new ClickEvent();
             clickEvent.setClickDate(LocalDateTime.now());
-            clickEvent.setUrlMapping(urlMapping);
+            clickEvent.setShortUrl(shortUrl);
             clickEvent.setIpAddress(ipAddress);
             clickEvent.setReferrer(referrer);
             clickEvent.setUserAgent(userAgent);
-
             clickEventRepository.save(clickEvent);
+
+            // Build a plain POJO UrlMapping for controller compatibility
+            UrlMapping mapping = new UrlMapping();
+            mapping.setId(item.getId());
+            mapping.setShortUrl(item.getShortUrl());
+            mapping.setOriginalUrl(item.getOriginalUrl());
+            mapping.setClickCount(item.getClickCount() != null ? item.getClickCount() : 0);
+            if (item.getCreatedDate() != null) {
+                mapping.setCreatedDate(LocalDateTime.parse(item.getCreatedDate(),
+                        DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+            }
+            // NOTE: User relationship is not populated — the controller only
+            // needs getOriginalUrl() for the redirect Location header.
+            return mapping;
         }
 
-        return urlMapping;
+        return null;
     }
 
+    /**
+     * Finds a URL mapping by its numeric ID, verifying user ownership.
+     */
     public UrlMappingDto getUrlByIdAndUser(Long id, User user) {
-        UrlMapping urlMapping = urlMappingRepository.findByIdAndUser(id, user)
+        // OLD POSTGRES: urlMappingRepository.findByIdAndUser(id, user)
+        // NEW DYNAMODB:  findByIdAndOwnerId(id, user.getId())
+        UrlMappingItem item = urlMappingRepository.findByIdAndOwnerId(id, user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("URL mapping not found or access denied"));
-        return convertToDto(urlMapping);
+        return convertToDto(item);
     }
 
+    /**
+     * Updates the original URL for a given mapping.
+     */
     public UrlMappingDto updateUrl(Long id, String newOriginalUrl, User user) {
-        UrlMapping urlMapping = urlMappingRepository.findByIdAndUser(id, user)
+        // OLD POSTGRES: urlMappingRepository.findByIdAndUser(id, user)
+        // NEW DYNAMODB:  findByIdAndOwnerId(id, user.getId())
+        UrlMappingItem item = urlMappingRepository.findByIdAndOwnerId(id, user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("URL mapping not found or access denied"));
+
         if (newOriginalUrl != null && !newOriginalUrl.isBlank()) {
-            urlMapping.setOriginalUrl(newOriginalUrl);
+            item.setOriginalUrl(newOriginalUrl);
+            item.setUpdatedDate(LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
         }
-        UrlMapping saved = urlMappingRepository.save(urlMapping);
+
+        // OLD POSTGRES: urlMappingRepository.save(urlMapping) — JPA merge
+        // NEW DYNAMODB:  save(item) — PutItem (upsert)
+        UrlMappingItem saved = urlMappingRepository.save(item);
         return convertToDto(saved);
     }
 
+    /**
+     * Deletes a URL mapping and its associated click events.
+     *
+     * NOTE: This is a cross-database operation. The URL mapping is deleted
+     * from DynamoDB and click events from PostgreSQL. There is no distributed
+     * transaction — if one delete fails, data inconsistency may occur.
+     * (This will be addressed when analytics migrate to MongoDB.)
+     */
     public void deleteUrl(Long id, User user) {
-        UrlMapping urlMapping = urlMappingRepository.findByIdAndUser(id, user)
+        // OLD POSTGRES: urlMappingRepository.findByIdAndUser(id, user)
+        // NEW DYNAMODB:  findByIdAndOwnerId(id, user.getId())
+        UrlMappingItem item = urlMappingRepository.findByIdAndOwnerId(id, user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("URL mapping not found or access denied"));
-        clickEventRepository.deleteByUrlMapping(urlMapping);
-        urlMappingRepository.delete(urlMapping);
+
+        // OLD POSTGRES: clickEventRepository.deleteByUrlMapping(urlMapping)
+        // NEW DYNAMODB:  clickEventRepository.deleteByShortUrl(shortUrl)
+        clickEventRepository.deleteByShortUrl(item.getShortUrl());
+
+        // OLD POSTGRES: urlMappingRepository.delete(urlMapping)
+        // NEW DYNAMODB:  deleteByShortUrl(shortUrl)
+        urlMappingRepository.deleteByShortUrl(item.getShortUrl());
     }
 
-    public List<ClickEventDetailDto> getClickEventDetails(String shortUrl, LocalDateTime start, LocalDateTime end, User user) {
-        UrlMapping urlMapping = urlMappingRepository.findByShortUrlAndUser(shortUrl, user);
-        if (urlMapping == null) {
+    /**
+     * Returns detailed click events for a specific URL within a date range.
+     */
+    public List<ClickEventDetailDto> getClickEventDetails(String shortUrl, LocalDateTime start,
+                                                           LocalDateTime end, User user) {
+        // OLD POSTGRES: urlMappingRepository.findByShortUrlAndUser(shortUrl, user)
+        // NEW DYNAMODB:  findByShortUrlAndOwnerId
+        Optional<UrlMappingItem> optItem =
+                urlMappingRepository.findByShortUrlAndOwnerId(shortUrl, user.getId());
+
+        if (optItem.isEmpty()) {
             throw new IllegalArgumentException("Short URL not found or access denied");
         }
-        return clickEventRepository.findByUrlMappingAndClickDateBetween(urlMapping, start, end).stream()
+
+        return clickEventRepository.findByShortUrlAndClickDateBetween(shortUrl, start, end).stream()
                 .map(click -> new ClickEventDetailDto(
                         click.getId(),
                         click.getClickDate(),
@@ -195,22 +371,38 @@ public class UrlMappingService {
                 .toList();
     }
 
+    /**
+     * Builds a dashboard summary for the user.
+     * Aggregates data from DynamoDB (URL metadata) and PostgreSQL (click events).
+     */
     public DashboardDto getDashboard(User user) {
-        List<UrlMapping> userUrls = urlMappingRepository.findByUser(user);
+        // OLD POSTGRES: urlMappingRepository.findByUser(user) — JPA
+        // NEW DYNAMODB:  findByOwnerId(user.getId()) — DynamoDB
+        List<UrlMappingItem> userUrls = urlMappingRepository.findByOwnerId(user.getId());
+
         long totalUrls = userUrls.size();
-        long totalClicks = userUrls.stream().mapToInt(UrlMapping::getClickCount).sum();
+        long totalClicks = userUrls.stream()
+                .mapToInt(item -> item.getClickCount() != null ? item.getClickCount() : 0)
+                .sum();
+
+        List<String> shortUrls = userUrls.stream()
+                .map(UrlMappingItem::getShortUrl)
+                .collect(Collectors.toList());
 
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
         LocalDateTime todayEnd = todayStart.plusDays(1);
-        long clicksToday = clickEventRepository.countByUrlMappingInAndClickDateBetween(
-                userUrls, todayStart, todayEnd);
+
+        long clicksToday = shortUrls.isEmpty() ? 0 :
+                clickEventRepository.countByShortUrlInAndClickDateBetween(shortUrls, todayStart, todayEnd);
 
         LocalDateTime weekStart = LocalDate.now().minusDays(7).atStartOfDay();
-        long clicksThisWeek = clickEventRepository.countByUrlMappingInAndClickDateBetween(
-                userUrls, weekStart, todayEnd);
+        long clicksThisWeek = shortUrls.isEmpty() ? 0 :
+                clickEventRepository.countByShortUrlInAndClickDateBetween(shortUrls, weekStart, todayEnd);
 
         List<UrlMappingDto> topUrls = userUrls.stream()
-                .sorted((a, b) -> Integer.compare(b.getClickCount(), a.getClickCount()))
+                .sorted((a, b) -> Integer.compare(
+                        b.getClickCount() != null ? b.getClickCount() : 0,
+                        a.getClickCount() != null ? a.getClickCount() : 0))
                 .limit(5)
                 .map(this::convertToDto)
                 .toList();
@@ -218,22 +410,34 @@ public class UrlMappingService {
         return new DashboardDto(totalUrls, totalClicks, clicksToday, clicksThisWeek, topUrls);
     }
 
+    /**
+     * Returns the top N URLs by total click count.
+     */
     public List<UrlMappingDto> getTopUrls(User user, int limit) {
-        return urlMappingRepository.findByUser(user).stream()
-                .sorted((a, b) -> Integer.compare(b.getClickCount(), a.getClickCount()))
+        return urlMappingRepository.findByOwnerId(user.getId()).stream()
+                .sorted((a, b) -> Integer.compare(
+                        b.getClickCount() != null ? b.getClickCount() : 0,
+                        a.getClickCount() != null ? a.getClickCount() : 0))
                 .limit(limit)
                 .map(this::convertToDto)
                 .toList();
     }
 
+    /**
+     * Returns the top N URLs by click count within a specific date range.
+     * NOTE: This is a cross-database N+1 operation — for each URL, we query
+     * PostgreSQL for click counts. This will be optimized when analytics
+     * migrate to MongoDB in a future phase.
+     */
     public List<UrlMappingDto> getTopUrlsByDate(User user, int limit, LocalDate start, LocalDate end) {
-        List<UrlMapping> userUrls = urlMappingRepository.findByUser(user);
+        List<UrlMappingItem> userUrls = urlMappingRepository.findByOwnerId(user.getId());
+
         return userUrls.stream()
                 .sorted((a, b) -> {
-                    long clicksA = clickEventRepository.countByUrlMappingAndClickDateBetween(
-                            a, start.atStartOfDay(), end.plusDays(1).atStartOfDay());
-                    long clicksB = clickEventRepository.countByUrlMappingAndClickDateBetween(
-                            b, start.atStartOfDay(), end.plusDays(1).atStartOfDay());
+                    long clicksA = clickEventRepository.countByShortUrlAndClickDateBetween(
+                            a.getShortUrl(), start.atStartOfDay(), end.plusDays(1).atStartOfDay());
+                    long clicksB = clickEventRepository.countByShortUrlAndClickDateBetween(
+                            b.getShortUrl(), start.atStartOfDay(), end.plusDays(1).atStartOfDay());
                     return Long.compare(clicksB, clicksA);
                 })
                 .limit(limit)

@@ -1,0 +1,31 @@
+# Build output
+target/
+*.jar
+!target/*.jar.original
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.classpath
+.project
+.settings/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Docs & misc
+HELP.md
+docker commands.txt
+*.md
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db

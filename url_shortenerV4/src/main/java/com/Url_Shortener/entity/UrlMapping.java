@@ -5,24 +5,33 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.List;
 
-@Entity
-@Table(name = "url_mapping")
+// ============================================================
+// OLD POSTGRES IMPLEMENTATION — Commented out for DynamoDB migration
+// ============================================================
+// The JPA entity annotations below are commented out because URL mappings
+// have been migrated to DynamoDB (see com.Url_Shortener.model.UrlMappingItem).
+// This class is kept for reference and to avoid breaking other classes
+// (like ClickEvent) that still reference UrlMapping as a type.
+// ============================================================
+
+//@Entity
+//@Table(name = "url_mapping")
 public class UrlMapping {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+//    @Id
+//    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    @Column(columnDefinition = "TEXT")
+//    @Column(columnDefinition = "TEXT")
     private String originalUrl;
-    @Column(unique = true)
+//    @Column(unique = true)
     private String shortUrl;
     private int clickCount = 0;
     private LocalDateTime createdDate;
 
-    @ManyToOne
-    @JoinColumn(name = "user_id")
+//    @ManyToOne
+//    @JoinColumn(name = "user_id")
     private User user;
 
-    @OneToMany(mappedBy = "urlMapping")
+//    @OneToMany(mappedBy = "urlMapping")
     private List<ClickEvent> clickEvents;
 
     public Long getId() {

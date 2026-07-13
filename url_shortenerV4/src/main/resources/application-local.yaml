@@ -16,6 +16,15 @@ spring:
       hibernate:
         format_sql: true
 
+# ============================================================
+# POLYGLOT PERSISTENCE: DynamoDB Local (local dev)
+# ============================================================
+dynamodb:
+  enabled: false
+  endpoint: http://localhost:8000
+  region: us-east-1
+  table-name: url_mappings
+
 # Debug logging for local development
 logging:
   level:
