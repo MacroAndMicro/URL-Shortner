@@ -6,12 +6,15 @@ import com.Url_Shortener.dto.ClickEventDetailDto;
 import com.Url_Shortener.dto.ClickEventDto;
 import com.Url_Shortener.dto.DashboardDto;
 import com.Url_Shortener.dto.UrlMappingDto;
-import com.Url_Shortener.entity.ClickEvent;
 import com.Url_Shortener.entity.UrlMapping;
 import com.Url_Shortener.entity.User;
 import com.Url_Shortener.model.UrlMappingItem;
-import com.Url_Shortener.repository.ClickEventRepository;
 import com.Url_Shortener.repository.UrlMappingDynamoRepository;
+import com.Url_Shortener.storage.AnalyticsStorage;
+
+// OLD POSTGRES IMPLEMENTATION — Commented out for MongoDB migration
+// import com.Url_Shortener.entity.ClickEvent;
+// import com.Url_Shortener.repository.ClickEventRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -51,17 +54,20 @@ public class UrlMappingService {
 
     // OLD POSTGRES IMPLEMENTATION
     // private final UrlMappingRepository urlMappingRepository;
+    // private final ClickEventRepository clickEventRepository;
 
     // NEW DYNAMODB IMPLEMENTATION
     private final UrlMappingDynamoRepository urlMappingRepository;
-    private final ClickEventRepository clickEventRepository;
+
+    // NEW MONGODB IMPLEMENTATION
+    private final AnalyticsStorage analyticsStorage;
     private final CacheService cacheService;
 
     public UrlMappingService(UrlMappingDynamoRepository urlMappingRepository,
-                             ClickEventRepository clickEventRepository,
+                             AnalyticsStorage analyticsStorage,
                              CacheService cacheService) {
         this.urlMappingRepository = urlMappingRepository;
-        this.clickEventRepository = clickEventRepository;
+        this.analyticsStorage = analyticsStorage;
         this.cacheService = cacheService;
     }
 
@@ -206,19 +212,10 @@ public class UrlMappingService {
                 urlMappingRepository.findByShortUrlAndOwnerId(shortUrl, user.getId());
 
         if (optItem.isPresent()) {
-            // OLD POSTGRES: clickEventRepository.findByUrlMappingAndClickDateBetween(urlMapping, start, end)
-            // NEW DYNAMODB:  findByShortUrlAndClickDateBetween(shortUrl, start, end)
-            return clickEventRepository.findByShortUrlAndClickDateBetween(shortUrl, start, end).stream()
-                    .collect(Collectors.groupingBy(click -> click.getClickDate().toLocalDate(),
-                            Collectors.counting()))
-                    .entrySet().stream()
-                    .map(entry -> {
-                        ClickEventDto dto = new ClickEventDto();
-                        dto.setClickDate(entry.getKey());
-                        dto.setCount(entry.getValue());
-                        return dto;
-                    })
-                    .collect(Collectors.toList());
+            // OLD POSTGRES: clickEventRepository.findByShortUrlAndClickDateBetween(shortUrl, start, end)
+            //               + groupingBy date
+            // NEW MONGODB:  analyticsStorage.findAggregatedByShortUrlAndDateBetween(shortUrl, start, end)
+            return analyticsStorage.findAggregatedByShortUrlAndDateBetween(shortUrl, start, end);
         }
         return Collections.emptyList();
     }
@@ -238,23 +235,11 @@ public class UrlMappingService {
             return Collections.emptyList();
         }
 
-        // OLD POSTGRES: clickEventRepository.findByUrlMappingInAndClickDateBetween(urlMappings, ...)
-        // NEW DYNAMODB:  findByShortUrlInAndClickDateBetween(shortUrls, ...)
-        List<ClickEvent> clickEvents = clickEventRepository.findByShortUrlInAndClickDateBetween(
+        // OLD POSTGRES: clickEventRepository.findByShortUrlInAndClickDateBetween(shortUrls, ...)
+        //               + groupingBy date + sorted
+        // NEW MONGODB:  analyticsStorage.findAggregatedByShortUrlsAndDateBetween(shortUrls, ...)
+        return analyticsStorage.findAggregatedByShortUrlsAndDateBetween(
                 shortUrls, start.atStartOfDay(), end.plusDays(1).atStartOfDay());
-
-        return clickEvents.stream()
-                .collect(Collectors.groupingBy(click -> click.getClickDate().toLocalDate(),
-                        Collectors.counting()))
-                .entrySet().stream()
-                .map(entry -> {
-                    ClickEventDto dto = new ClickEventDto();
-                    dto.setClickDate(entry.getKey());
-                    dto.setCount(entry.getValue());
-                    return dto;
-                })
-                .sorted((a, b) -> a.getClickDate().compareTo(b.getClickDate()))
-                .collect(Collectors.toList());
     }
 
     /**
@@ -303,16 +288,23 @@ public class UrlMappingService {
     }
 
     /**
-     * Logs a click event to PostgreSQL (cross-database operation).
+     * Logs a click event.
+     *
+     * OLD POSTGRES: Saved ClickEvent entity to PostgreSQL via JPA.
+     * NEW MONGODB:  Delegates to AnalyticsStorage.saveClickEvent().
      */
     private void logClickEvent(String shortUrl, String ipAddress, String referrer, String userAgent) {
-        ClickEvent clickEvent = new ClickEvent();
-        clickEvent.setClickDate(LocalDateTime.now());
-        clickEvent.setShortUrl(shortUrl);
-        clickEvent.setIpAddress(ipAddress);
-        clickEvent.setReferrer(referrer);
-        clickEvent.setUserAgent(userAgent);
-        clickEventRepository.save(clickEvent);
+        // OLD POSTGRES IMPLEMENTATION
+        // ClickEvent clickEvent = new ClickEvent();
+        // clickEvent.setClickDate(LocalDateTime.now());
+        // clickEvent.setShortUrl(shortUrl);
+        // clickEvent.setIpAddress(ipAddress);
+        // clickEvent.setReferrer(referrer);
+        // clickEvent.setUserAgent(userAgent);
+        // clickEventRepository.save(clickEvent);
+
+        // NEW MONGODB IMPLEMENTATION
+        analyticsStorage.saveClickEvent(shortUrl, ipAddress, referrer, userAgent);
     }
 
     /**
@@ -398,8 +390,9 @@ public class UrlMappingService {
                 .orElseThrow(() -> new IllegalArgumentException("URL mapping not found or access denied"));
 
         // OLD POSTGRES: clickEventRepository.deleteByUrlMapping(urlMapping)
-        // NEW DYNAMODB:  clickEventRepository.deleteByShortUrl(shortUrl)
-        clickEventRepository.deleteByShortUrl(item.getShortUrl());
+        //               → clickEventRepository.deleteByShortUrl(shortUrl)
+        // NEW MONGODB:  analyticsStorage.deleteByShortUrl(shortUrl)
+        analyticsStorage.deleteByShortUrl(item.getShortUrl());
 
         // OLD POSTGRES: urlMappingRepository.delete(urlMapping)
         // NEW DYNAMODB:  deleteByShortUrl(shortUrl)
@@ -425,15 +418,10 @@ public class UrlMappingService {
             throw new IllegalArgumentException("Short URL not found or access denied");
         }
 
-        return clickEventRepository.findByShortUrlAndClickDateBetween(shortUrl, start, end).stream()
-                .map(click -> new ClickEventDetailDto(
-                        click.getId(),
-                        click.getClickDate(),
-                        click.getIpAddress(),
-                        click.getReferrer(),
-                        click.getUserAgent()
-                ))
-                .toList();
+        // OLD POSTGRES: clickEventRepository.findByShortUrlAndClickDateBetween(...)
+        //               + map to ClickEventDetailDto
+        // NEW MONGODB:  analyticsStorage.findByShortUrlAndDateBetween(...)
+        return analyticsStorage.findByShortUrlAndDateBetween(shortUrl, start, end);
     }
 
     /**
@@ -457,12 +445,16 @@ public class UrlMappingService {
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
         LocalDateTime todayEnd = todayStart.plusDays(1);
 
+        // OLD POSTGRES: clickEventRepository.countByShortUrlInAndClickDateBetween(shortUrls, ...)
+        // NEW MONGODB:  analyticsStorage.countByShortUrlsAndDateBetween(shortUrls, ...)
         long clicksToday = shortUrls.isEmpty() ? 0 :
-                clickEventRepository.countByShortUrlInAndClickDateBetween(shortUrls, todayStart, todayEnd);
+                analyticsStorage.countByShortUrlsAndDateBetween(shortUrls, todayStart, todayEnd);
 
         LocalDateTime weekStart = LocalDate.now().minusDays(7).atStartOfDay();
+        // OLD POSTGRES: clickEventRepository.countByShortUrlInAndClickDateBetween(shortUrls, ...)
+        // NEW MONGODB:  analyticsStorage.countByShortUrlsAndDateBetween(shortUrls, ...)
         long clicksThisWeek = shortUrls.isEmpty() ? 0 :
-                clickEventRepository.countByShortUrlInAndClickDateBetween(shortUrls, weekStart, todayEnd);
+                analyticsStorage.countByShortUrlsAndDateBetween(shortUrls, weekStart, todayEnd);
 
         List<UrlMappingDto> topUrls = userUrls.stream()
                 .sorted((a, b) -> Integer.compare(
@@ -499,9 +491,11 @@ public class UrlMappingService {
 
         return userUrls.stream()
                 .sorted((a, b) -> {
-                    long clicksA = clickEventRepository.countByShortUrlAndClickDateBetween(
+                    // OLD POSTGRES: clickEventRepository.countByShortUrlAndClickDateBetween(...)
+                    // NEW MONGODB:  analyticsStorage.countByShortUrlAndDateBetween(...)
+                    long clicksA = analyticsStorage.countByShortUrlAndDateBetween(
                             a.getShortUrl(), start.atStartOfDay(), end.plusDays(1).atStartOfDay());
-                    long clicksB = clickEventRepository.countByShortUrlAndClickDateBetween(
+                    long clicksB = analyticsStorage.countByShortUrlAndDateBetween(
                             b.getShortUrl(), start.atStartOfDay(), end.plusDays(1).atStartOfDay());
                     return Long.compare(clicksB, clicksA);
                 })

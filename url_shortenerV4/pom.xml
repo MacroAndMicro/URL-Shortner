@@ -129,6 +129,14 @@
 		</dependency>
 
 		<!-- ============================================================ -->
+		<!-- POLYGLOT PERSISTENCE: MongoDB (Analytics)                     -->
+		<!-- ============================================================ -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-mongodb</artifactId>
+		</dependency>
+
+		<!-- ============================================================ -->
 		<!-- POLYGLOT PERSISTENCE: DynamoDB (URL Mapping)                  -->
 		<!-- ============================================================ -->
 		<dependency>

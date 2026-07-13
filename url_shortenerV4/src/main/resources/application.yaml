@@ -31,6 +31,12 @@ spring:
           max-active: 8
           max-idle: 8
           min-idle: 2
+    # ============================================================
+    # POLYGLOT PERSISTENCE: MongoDB (Analytics)
+    # ============================================================
+    mongodb:
+      uri: ${SPRING_DATA_MONGODB_URI:mongodb://localhost:27017/urlshortener}
+      database: urlshortener
 
 jwt:
   secret: ${JWT_SECRET:gcowAfycBs76wnCP7cvO6xe5Qtq2hZWd2k++abz5ub0=}

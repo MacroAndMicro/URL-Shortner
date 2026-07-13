@@ -57,6 +57,21 @@ services:
       retries: 10
       start_period: 10s
 
+  mongodb:
+    image: mongo:7
+    container_name: url-shortener-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   app:
     build: .
 
@@ -68,6 +83,8 @@ services:
       dynamodb:
         condition: service_started
       redis:
+        condition: service_healthy
+      mongodb:
         condition: service_healthy
 
     restart: on-failure
@@ -87,8 +104,10 @@ services:
       AWS_REGION: ${AWS_REGION}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: "6379"
+      SPRING_DATA_MONGODB_URI: mongodb://mongodb:27017/urlshortener
 
 volumes:
   postgres_data:
   dynamodb_data:
   redis_data:
+  mongodb_data:

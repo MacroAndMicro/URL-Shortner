@@ -3,17 +3,28 @@ package com.Url_Shortener.entity;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
-@Entity
-@Table(name = "click_event")
+
+// ============================================================
+// OLD POSTGRES IMPLEMENTATION — Commented out for MongoDB migration
+// ============================================================
+// This JPA entity has been replaced by:
+//   - ClickEventDocument (MongoDB document)
+//   - AnalyticsStorage interface (business abstraction)
+//   - MongoAnalyticsStorage (implementation)
+// Kept for reference.
+// ============================================================
+
+//@Entity
+//@Table(name = "click_event")
 public class ClickEvent {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    //@Id
+    //@GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     private LocalDateTime clickDate;
     private String ipAddress;
-    @Column(columnDefinition = "TEXT")
+    //@Column(columnDefinition = "TEXT")
     private String referrer;
-    @Column(columnDefinition = "TEXT")
+    //@Column(columnDefinition = "TEXT")
     private String userAgent;
 
     // ============================================================
@@ -22,7 +33,7 @@ public class ClickEvent {
     // URL mappings are now stored in DynamoDB, not PostgreSQL.
     // The shortUrl field acts as the cross-database join key.
     // ============================================================
-    @Column(name = "short_url")
+    //@Column(name = "short_url")
     private String shortUrl;
 
     public Long getId() {
