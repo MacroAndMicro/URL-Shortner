@@ -1,0 +1,148 @@
+package com.Url_Shortener.config;
+
+import com.Url_Shortener.event.ClickEventCreatedEvent;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.annotation.EnableKafka;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.core.*;
+import org.springframework.kafka.listener.CommonErrorHandler;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.support.serializer.JsonDeserializer;
+import org.springframework.kafka.support.serializer.JsonSerializer;
+import org.springframework.util.backoff.ExponentialBackOff;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * ============================================================
+ * KAFKA INTEGRATION: Kafka Configuration
+ * ============================================================
+ *
+ * Configures Kafka producer, consumer, retry, and Dead Letter
+ * Topic (DLT) handling. All configuration values are read from
+ * application.yaml (Spring Boot auto-configuration properties).
+ *
+ * PRODUCER:
+ *   - JSON serialization (String keys, ClickEventCreatedEvent values)
+ *   - acks=all for durability
+ *   - Idempotent producer (exactly-once semantics)
+ *   - Batching enabled for throughput
+ *
+ * CONSUMER:
+ *   - JSON deserialization
+ *   - Consumer group: analytics-consumer
+ *   - Manual acknowledgment
+ *   - Trusted packages: com.Url_Shortener.event
+ *
+ * RETRY & DLT:
+ *   - Exponential backoff: 1s → 2s → 4s (3 attempts total)
+ *   - On exhaustion → Dead Letter Topic: analytics-events-dlt
+ */
+@Configuration
+@EnableKafka
+public class KafkaConfig {
+
+    @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
+    private String bootstrapServers;
+
+    // ============================================================
+    // PRODUCER
+    // ============================================================
+
+    @Bean
+    public ProducerFactory<String, ClickEventCreatedEvent> producerFactory() {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
+        props.put(ProducerConfig.ACKS_CONFIG, "all");
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+        props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
+        props.put(ProducerConfig.BATCH_SIZE_CONFIG, 16384);
+        props.put(ProducerConfig.LINGER_MS_CONFIG, 5);
+        return new DefaultKafkaProducerFactory<>(props);
+    }
+
+    @Bean
+    public KafkaTemplate<String, ClickEventCreatedEvent> kafkaTemplate() {
+        return new KafkaTemplate<>(producerFactory());
+    }
+
+    // ============================================================
+    // CONSUMER
+    // ============================================================
+
+    @Bean
+    public ConsumerFactory<String, ClickEventCreatedEvent> consumerFactory() {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, "analytics-consumer");
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.Url_Shortener.event");
+        props.put(JsonDeserializer.VALUE_DEFAULT_TYPE,
+                "com.Url_Shortener.event.ClickEventCreatedEvent");
+
+        return new DefaultKafkaConsumerFactory<>(
+                props,
+                new StringDeserializer(),
+                new JsonDeserializer<>()
+        );
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, ClickEventCreatedEvent>
+    kafkaListenerContainerFactory() {
+        ConcurrentKafkaListenerContainerFactory<String, ClickEventCreatedEvent> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory());
+        factory.setCommonErrorHandler(kafkaErrorHandler());
+        return factory;
+    }
+
+    // ============================================================
+    // RETRY & DEAD LETTER TOPIC
+    // ============================================================
+
+    /**
+     * Configures error handling with exponential backoff retry and DLT.
+     *
+     * Strategy:
+     *   1. First failure  → retry after 1 second
+     *   2. Second failure → retry after 2 seconds
+     *   3. Third failure  → retry after 4 seconds
+     *   4. All retries exhausted → publish to analytics-events-dlt
+     */
+    @Bean
+    public CommonErrorHandler kafkaErrorHandler() {
+        // Dead Letter Topic recoverer: sends failed messages to analytics-events-dlt
+        KafkaTemplate<String, ClickEventCreatedEvent> dltTemplate =
+                new KafkaTemplate<>(producerFactory());
+        DeadLetterPublishingRecoverer recoverer =
+                new DeadLetterPublishingRecoverer(dltTemplate);
+
+        // Exponential backoff: 1s initial, 2x multiplier, 10s max, 3 attempts
+        ExponentialBackOff backOff = new ExponentialBackOff(1000L, 2.0);
+        backOff.setMaxInterval(10000L);
+
+        DefaultErrorHandler errorHandler =
+                new DefaultErrorHandler(recoverer, backOff);
+        errorHandler.setRetryListeners((record, ex, deliveryAttempt) ->
+                org.slf4j.LoggerFactory.getLogger(KafkaConfig.class).warn(
+                        "Kafka retry attempt {} for event: key={}, error={}",
+                        deliveryAttempt, record != null ? record.key() : "null",
+                        ex.getMessage())
+        );
+
+        return errorHandler;
+    }
+}

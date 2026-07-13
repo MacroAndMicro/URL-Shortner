@@ -8,7 +8,9 @@ import com.Url_Shortener.dto.DashboardDto;
 import com.Url_Shortener.dto.UrlMappingDto;
 import com.Url_Shortener.entity.UrlMapping;
 import com.Url_Shortener.entity.User;
+import com.Url_Shortener.event.ClickEventCreatedEvent;
 import com.Url_Shortener.model.UrlMappingItem;
+import com.Url_Shortener.publisher.AnalyticsPublisher;
 import com.Url_Shortener.repository.UrlMappingDynamoRepository;
 import com.Url_Shortener.storage.AnalyticsStorage;
 
@@ -59,15 +61,21 @@ public class UrlMappingService {
     // NEW DYNAMODB IMPLEMENTATION
     private final UrlMappingDynamoRepository urlMappingRepository;
 
-    // NEW MONGODB IMPLEMENTATION
+    // NEW MONGODB IMPLEMENTATION — AnalyticsStorage for READ queries (dashboard, analytics)
     private final AnalyticsStorage analyticsStorage;
+
+    // NEW KAFKA IMPLEMENTATION — AnalyticsPublisher for WRITE (fire-and-forget events)
+    private final AnalyticsPublisher analyticsPublisher;
+
     private final CacheService cacheService;
 
     public UrlMappingService(UrlMappingDynamoRepository urlMappingRepository,
                              AnalyticsStorage analyticsStorage,
+                             AnalyticsPublisher analyticsPublisher,
                              CacheService cacheService) {
         this.urlMappingRepository = urlMappingRepository;
         this.analyticsStorage = analyticsStorage;
+        this.analyticsPublisher = analyticsPublisher;
         this.cacheService = cacheService;
     }
 
@@ -288,10 +296,15 @@ public class UrlMappingService {
     }
 
     /**
-     * Logs a click event.
+     * Logs a click event by publishing to Kafka.
      *
      * OLD POSTGRES: Saved ClickEvent entity to PostgreSQL via JPA.
-     * NEW MONGODB:  Delegates to AnalyticsStorage.saveClickEvent().
+     * OLD MONGODB:  Called analyticsStorage.saveClickEvent() directly (synchronous).
+     * NEW KAFKA:    Publishes ClickEventCreatedEvent to Kafka (asynchronous).
+     *               The Kafka consumer persists to MongoDB via AnalyticsStorage.
+     *
+     * This method is fire-and-forget — it never throws and never blocks
+     * the redirect response.
      */
     private void logClickEvent(String shortUrl, String ipAddress, String referrer, String userAgent) {
         // OLD POSTGRES IMPLEMENTATION
@@ -303,8 +316,19 @@ public class UrlMappingService {
         // clickEvent.setUserAgent(userAgent);
         // clickEventRepository.save(clickEvent);
 
-        // NEW MONGODB IMPLEMENTATION
-        analyticsStorage.saveClickEvent(shortUrl, ipAddress, referrer, userAgent);
+        // OLD MONGODB IMPLEMENTATION
+        // analyticsStorage.saveClickEvent(shortUrl, ipAddress, referrer, userAgent);
+
+        // NEW KAFKA IMPLEMENTATION
+        ClickEventCreatedEvent event = new ClickEventCreatedEvent(
+                shortUrl,
+                null,  // originalUrl not available on redirect hot-path (only in DynamoDB)
+                ipAddress,
+                referrer,
+                userAgent,
+                null   // ownerId not available on redirect hot-path
+        );
+        analyticsPublisher.publish(event);
     }
 
     /**
