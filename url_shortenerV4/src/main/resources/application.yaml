@@ -18,6 +18,20 @@ spring:
       hibernate:
         format_sql: true
 
+  # ============================================================
+  # POLYGLOT PERSISTENCE: Redis Cache
+  # ============================================================
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 2
+
 jwt:
   secret: ${JWT_SECRET:gcowAfycBs76wnCP7cvO6xe5Qtq2hZWd2k++abz5ub0=}
   expiration: 86400000
@@ -33,9 +47,17 @@ server:
       force: true
 
 # ============================================================
+# Application Cache Settings
+# ============================================================
+app:
+  cache:
+    redis:
+      ttl-hours: ${REDIS_CACHE_TTL_HOURS:24}
+
+# ============================================================
 # POLYGLOT PERSISTENCE: DynamoDB Configuration
 # ============================================================
 dynamodb:
-  endpoint: ${DYNAMODB_ENDPOINT:http://127.0.0.1:8000}
+  endpoint: ${DYNAMODB_ENDPOINT:http://localhost:8000}
   region: ${AWS_REGION:us-east-1}
   table-name: ${DYNAMODB_TABLE_NAME:url_mappings}

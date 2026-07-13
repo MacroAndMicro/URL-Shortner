@@ -1,5 +1,7 @@
 package com.Url_Shortener.service;
 
+import com.Url_Shortener.cache.CacheService;
+import com.Url_Shortener.cache.CachedUrlData;
 import com.Url_Shortener.dto.ClickEventDetailDto;
 import com.Url_Shortener.dto.ClickEventDto;
 import com.Url_Shortener.dto.DashboardDto;
@@ -41,6 +43,7 @@ import java.util.stream.Collectors;
  *     UrlMapping entity references (cross-database FK decoupling)
  *   - clickCount native SQL → DynamoDB atomic UpdateExpression
  *   - Pageable support adapted for DynamoDB token-based pagination
+ *   - Redis cache-aside layer added for redirect hot-path optimization
  * ============================================================
  */
 @Service
@@ -52,11 +55,14 @@ public class UrlMappingService {
     // NEW DYNAMODB IMPLEMENTATION
     private final UrlMappingDynamoRepository urlMappingRepository;
     private final ClickEventRepository clickEventRepository;
+    private final CacheService cacheService;
 
     public UrlMappingService(UrlMappingDynamoRepository urlMappingRepository,
-                             ClickEventRepository clickEventRepository) {
+                             ClickEventRepository clickEventRepository,
+                             CacheService cacheService) {
         this.urlMappingRepository = urlMappingRepository;
         this.clickEventRepository = clickEventRepository;
+        this.cacheService = cacheService;
     }
 
     /**
@@ -89,6 +95,12 @@ public class UrlMappingService {
         item.setUpdatedDate(now);
 
         UrlMappingItem saved = urlMappingRepository.save(item);
+
+        // POLYGLOT PERSISTENCE: Populate Redis cache after DynamoDB write.
+        // If Redis is unavailable, this is a no-op — the cache will be
+        // populated on the next redirect (cache-aside pattern).
+        cacheService.put(shortUrl, CachedUrlData.from(saved));
+
         return convertToDto(saved);
     }
 
@@ -249,47 +261,90 @@ public class UrlMappingService {
      * Resolves a short URL to its original URL and logs the click event.
      * This is the HOT PATH — called on every redirect.
      *
+     * CACHE-ASIDE PATTERN:
+     *   1. Look up Redis first.
+     *   2. On HIT → increment clickCount in DynamoDB, log click event, return.
+     *   3. On MISS → read from DynamoDB, populate Redis, then proceed.
+     *   4. If Redis is unavailable → fall back to DynamoDB directly.
+     *
      * NOTE: Returns UrlMapping (plain POJO, not JPA entity) for controller
      * compatibility. The UrlMapping entity has been de-JPA-annotated.
      */
     public UrlMapping getOriginalUrl(String shortUrl, String ipAddress, String referrer, String userAgent) {
-        // OLD POSTGRES: urlMappingRepository.findByShortUrl(shortUrl)
-        // NEW DYNAMODB:  findByShortUrl(shortUrl) — GetItem on PK
+        // STEP 1: Try Redis cache first (silently falls back to DynamoDB on error)
+        Optional<CachedUrlData> cached = cacheService.get(shortUrl);
+
+        if (cached.isPresent()) {
+            // CACHE HIT — we know the URL exists. Increment clickCount in DynamoDB
+            // and log the click event. No need to re-read DynamoDB for the mapping.
+            CachedUrlData data = cached.get();
+            urlMappingRepository.incrementClickCount(shortUrl);
+            logClickEvent(shortUrl, ipAddress, referrer, userAgent);
+            return buildUrlMappingFromCache(data);
+        }
+
+        // STEP 2: CACHE MISS or Redis unavailable — read from DynamoDB
         Optional<UrlMappingItem> optItem = urlMappingRepository.findByShortUrl(shortUrl);
 
         if (optItem.isPresent()) {
             UrlMappingItem item = optItem.get();
 
-            // OLD POSTGRES: clickEventRepository.clickCount(urlMapping.getId()) — native SQL
-            // NEW DYNAMODB:  dynamoRepository.incrementClickCount(shortUrl) — atomic UpdateExpression
+            // Populate Redis for next lookup (best-effort, silently fails)
+            cacheService.put(shortUrl, CachedUrlData.from(item));
+
+            // Increment clickCount and log the click event
             urlMappingRepository.incrementClickCount(shortUrl);
+            logClickEvent(shortUrl, ipAddress, referrer, userAgent);
 
-            // OLD POSTGRES: new ClickEvent(), clickEvent.setUrlMapping(urlMapping)
-            // NEW DYNAMODB:  new ClickEvent(), clickEvent.setShortUrl(shortUrl)
-            ClickEvent clickEvent = new ClickEvent();
-            clickEvent.setClickDate(LocalDateTime.now());
-            clickEvent.setShortUrl(shortUrl);
-            clickEvent.setIpAddress(ipAddress);
-            clickEvent.setReferrer(referrer);
-            clickEvent.setUserAgent(userAgent);
-            clickEventRepository.save(clickEvent);
-
-            // Build a plain POJO UrlMapping for controller compatibility
-            UrlMapping mapping = new UrlMapping();
-            mapping.setId(item.getId());
-            mapping.setShortUrl(item.getShortUrl());
-            mapping.setOriginalUrl(item.getOriginalUrl());
-            mapping.setClickCount(item.getClickCount() != null ? item.getClickCount() : 0);
-            if (item.getCreatedDate() != null) {
-                mapping.setCreatedDate(LocalDateTime.parse(item.getCreatedDate(),
-                        DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-            }
-            // NOTE: User relationship is not populated — the controller only
-            // needs getOriginalUrl() for the redirect Location header.
-            return mapping;
+            return buildUrlMappingFromItem(item);
         }
 
         return null;
+    }
+
+    /**
+     * Logs a click event to PostgreSQL (cross-database operation).
+     */
+    private void logClickEvent(String shortUrl, String ipAddress, String referrer, String userAgent) {
+        ClickEvent clickEvent = new ClickEvent();
+        clickEvent.setClickDate(LocalDateTime.now());
+        clickEvent.setShortUrl(shortUrl);
+        clickEvent.setIpAddress(ipAddress);
+        clickEvent.setReferrer(referrer);
+        clickEvent.setUserAgent(userAgent);
+        clickEventRepository.save(clickEvent);
+    }
+
+    /**
+     * Builds a UrlMapping POJO from a DynamoDB UrlMappingItem.
+     */
+    private UrlMapping buildUrlMappingFromItem(UrlMappingItem item) {
+        UrlMapping mapping = new UrlMapping();
+        mapping.setId(item.getId());
+        mapping.setShortUrl(item.getShortUrl());
+        mapping.setOriginalUrl(item.getOriginalUrl());
+        mapping.setClickCount(item.getClickCount() != null ? item.getClickCount() : 0);
+        if (item.getCreatedDate() != null) {
+            mapping.setCreatedDate(LocalDateTime.parse(item.getCreatedDate(),
+                    DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+        }
+        return mapping;
+    }
+
+    /**
+     * Builds a UrlMapping POJO from a Redis CachedUrlData (cache hit path).
+     * Avoids an unnecessary DynamoDB GetItem when the data is already in cache.
+     */
+    private UrlMapping buildUrlMappingFromCache(CachedUrlData data) {
+        UrlMapping mapping = new UrlMapping();
+        mapping.setShortUrl(data.getShortUrl());
+        mapping.setOriginalUrl(data.getOriginalUrl());
+        mapping.setClickCount(data.getClickCount() != null ? data.getClickCount() : 0);
+        if (data.getCreatedDate() != null) {
+            mapping.setCreatedDate(LocalDateTime.parse(data.getCreatedDate(),
+                    DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+        }
+        return mapping;
     }
 
     /**
@@ -320,6 +375,11 @@ public class UrlMappingService {
         // OLD POSTGRES: urlMappingRepository.save(urlMapping) — JPA merge
         // NEW DYNAMODB:  save(item) — PutItem (upsert)
         UrlMappingItem saved = urlMappingRepository.save(item);
+
+        // POLYGLOT PERSISTENCE: Update Redis cache with the new value.
+        // Best-effort — silently fails if Redis is unavailable.
+        cacheService.put(saved.getShortUrl(), CachedUrlData.from(saved));
+
         return convertToDto(saved);
     }
 
@@ -344,6 +404,11 @@ public class UrlMappingService {
         // OLD POSTGRES: urlMappingRepository.delete(urlMapping)
         // NEW DYNAMODB:  deleteByShortUrl(shortUrl)
         urlMappingRepository.deleteByShortUrl(item.getShortUrl());
+
+        // POLYGLOT PERSISTENCE: Evict from Redis cache after DynamoDB delete.
+        // Best-effort — if Redis is unavailable, the TTL will expire the
+        // stale entry eventually.
+        cacheService.evict(item.getShortUrl());
     }
 
     /**

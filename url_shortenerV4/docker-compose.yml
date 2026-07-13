@@ -26,16 +26,32 @@ services:
       start_period: 10s
 
   dynamodb:
-    image: amazon/dynamodb-local:2.5.4
+    image: amazon/dynamodb-local:latest
     container_name: url-shortener-dynamodb
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
       - dynamodb_data:/home/dynamodblocal/data
-    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/data"
+    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8000 && echo OK && exec 3>&-"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7
+    container_name: url-shortener-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -51,11 +67,13 @@ services:
         condition: service_healthy
       dynamodb:
         condition: service_started
+      redis:
+        condition: service_healthy
 
     restart: on-failure
 
     ports:
-      - "8080:8080"
+      - "8082:8080"
       - "5005:5005"
 
     environment:
@@ -67,7 +85,10 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_REGION: ${AWS_REGION}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
 
 volumes:
   postgres_data:
   dynamodb_data:
+  redis_data:
