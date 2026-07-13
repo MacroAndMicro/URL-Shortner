@@ -92,6 +92,25 @@ app:
       ttl-hours: ${REDIS_CACHE_TTL_HOURS:24}
 
 # ============================================================
+# OBSERVABILITY: Spring Boot Actuator & Prometheus
+# ============================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: url-shortener
+
+# ============================================================
 # POLYGLOT PERSISTENCE: DynamoDB Configuration
 # ============================================================
 dynamodb:

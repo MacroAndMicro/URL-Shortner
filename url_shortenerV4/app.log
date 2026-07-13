@@ -1237,3 +1237,211 @@ Hibernate:
 2026-07-13T09:03:56.383Z DEBUG 8204 --- [Url_Shortener] [io-8081-exec-10] o.s.security.web.FilterChainProxy        : Securing GET /error
 2026-07-13T09:03:56.383Z DEBUG 8204 --- [Url_Shortener] [io-8081-exec-10] o.s.security.web.FilterChainProxy        : Secured GET /error
 2026-07-13T09:03:56.385Z DEBUG 8204 --- [Url_Shortener] [io-8081-exec-10] o.s.s.w.a.AnonymousAuthenticationFilter  : Set SecurityContextHolder to anonymous SecurityContext
+2026-07-13T09:27:40.612Z  WARN 8204 --- [Url_Shortener] [l-1:housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=1m39s600ms969µs700ns).
+2026-07-13T09:53:10.635Z  WARN 8204 --- [Url_Shortener] [l-1:housekeeper] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@13ab02f (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-07-13T09:53:28.695Z  WARN 8204 --- [Url_Shortener] [l-1:housekeeper] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@6eccf64e (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-07-13T09:53:36.164Z  WARN 8204 --- [Url_Shortener] [l-1:housekeeper] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@2a07745c (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-07-13T09:53:52.389Z  WARN 8204 --- [Url_Shortener] [l-1:housekeeper] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@74baf0e1 (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-07-13T09:53:56.356Z  WARN 8204 --- [Url_Shortener] [l-1:housekeeper] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@5b9b55a5 (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-07-13T09:54:05.981Z  WARN 8204 --- [Url_Shortener] [l-1:housekeeper] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@4e7f28c1 (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-07-13T09:54:21.660Z  WARN 8204 --- [Url_Shortener] [l-1:housekeeper] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@5c9692ae (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-07-13T09:54:25.008Z  WARN 8204 --- [Url_Shortener] [l-1:housekeeper] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@6aafd0a1 (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-07-13T09:54:26.007Z  WARN 8204 --- [Url_Shortener] [l-1:housekeeper] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@88c50bf (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-07-13T09:54:30.392Z  WARN 8204 --- [Url_Shortener] [l-1:housekeeper] com.zaxxer.hikari.pool.PoolBase          : HikariPool-1 - Failed to validate connection org.postgresql.jdbc.PgConnection@60e7b0e2 (This connection has been closed.). Possibly consider using a shorter maxLifetime value.
+2026-07-13T10:05:25.152Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-9] o.s.security.web.FilterChainProxy        : Securing GET /api/v1/auth/public/register
+2026-07-13T10:05:25.216Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-9] o.s.security.web.FilterChainProxy        : Secured GET /api/v1/auth/public/register
+2026-07-13T10:05:25.704Z  WARN 8204 --- [Url_Shortener] [nio-8081-exec-9] .w.s.m.s.DefaultHandlerExceptionResolver : Resolved [org.springframework.web.HttpRequestMethodNotSupportedException: Request method 'GET' is not supported]
+2026-07-13T10:05:25.707Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-9] o.s.s.w.a.AnonymousAuthenticationFilter  : Set SecurityContextHolder to anonymous SecurityContext
+2026-07-13T10:05:25.723Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-9] o.s.security.web.FilterChainProxy        : Securing GET /error
+2026-07-13T10:05:25.726Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-9] o.s.security.web.FilterChainProxy        : Secured GET /error
+2026-07-13T10:05:25.889Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-9] o.s.s.w.a.AnonymousAuthenticationFilter  : Set SecurityContextHolder to anonymous SecurityContext
+2026-07-13T10:05:33.173Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-3] o.s.security.web.FilterChainProxy        : Securing POST /api/v1/auth/public/login
+2026-07-13T10:05:33.173Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-3] o.s.security.web.FilterChainProxy        : Secured POST /api/v1/auth/public/login
+Hibernate: 
+    select
+        u1_0.id,
+        u1_0.created_date,
+        u1_0.email,
+        u1_0.password,
+        u1_0.username 
+    from
+        users u1_0 
+    where
+        u1_0.username=?
+2026-07-13T10:05:33.461Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-3] o.s.s.a.dao.DaoAuthenticationProvider    : Failed to find user 'x'
+2026-07-13T10:05:33.463Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-3] o.s.s.authentication.ProviderManager     : Authentication failed with provider DaoAuthenticationProvider since Bad credentials
+2026-07-13T10:05:33.476Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-3] o.s.s.w.a.AnonymousAuthenticationFilter  : Set SecurityContextHolder to anonymous SecurityContext
+2026-07-13T10:05:41.700Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-1] o.s.security.web.FilterChainProxy        : Securing POST /api/v1/auth/public/register
+2026-07-13T10:05:41.700Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-1] o.s.security.web.FilterChainProxy        : Secured POST /api/v1/auth/public/register
+Hibernate: 
+    select
+        u1_0.id 
+    from
+        users u1_0 
+    where
+        u1_0.username=? 
+    fetch
+        first ? rows only
+Hibernate: 
+    select
+        u1_0.id 
+    from
+        users u1_0 
+    where
+        u1_0.email=? 
+    fetch
+        first ? rows only
+Hibernate: 
+    insert 
+    into
+        users
+        (created_date, email, password, username) 
+    values
+        (?, ?, ?, ?)
+Hibernate: 
+    insert 
+    into
+        user_roles
+        (user_id, role) 
+    values
+        (?, ?)
+2026-07-13T10:05:41.872Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-1] o.s.s.w.a.AnonymousAuthenticationFilter  : Set SecurityContextHolder to anonymous SecurityContext
+2026-07-13T10:05:58.328Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-7] o.s.security.web.FilterChainProxy        : Securing POST /api/v1/auth/public/login
+2026-07-13T10:05:58.328Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-7] o.s.security.web.FilterChainProxy        : Secured POST /api/v1/auth/public/login
+Hibernate: 
+    select
+        u1_0.id,
+        u1_0.created_date,
+        u1_0.email,
+        u1_0.password,
+        u1_0.username 
+    from
+        users u1_0 
+    where
+        u1_0.username=?
+Hibernate: 
+    select
+        r1_0.user_id,
+        r1_0.role 
+    from
+        user_roles r1_0 
+    where
+        r1_0.user_id=?
+2026-07-13T10:05:58.427Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-7] o.s.s.a.dao.DaoAuthenticationProvider    : Authenticated user
+2026-07-13T10:05:58.427Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-7] o.s.s.w.a.AnonymousAuthenticationFilter  : Set SecurityContextHolder to anonymous SecurityContext
+Hibernate: 
+    select
+        u1_0.id,
+        u1_0.created_date,
+        u1_0.email,
+        u1_0.password,
+        u1_0.username 
+    from
+        users u1_0 
+    where
+        u1_0.username=?
+Hibernate: 
+    select
+        rt1_0.id,
+        rt1_0.expiry_date,
+        rt1_0.token,
+        rt1_0.user_id 
+    from
+        refresh_token rt1_0 
+    where
+        rt1_0.user_id=?
+Hibernate: 
+    insert 
+    into
+        refresh_token
+        (expiry_date, token, user_id) 
+    values
+        (?, ?, ?)
+2026-07-13T10:06:37.313Z DEBUG 8204 --- [Url_Shortener] [io-8081-exec-10] o.s.security.web.FilterChainProxy        : Securing POST /api/v1/urls/shorten
+Hibernate: 
+    select
+        u1_0.id,
+        u1_0.created_date,
+        u1_0.email,
+        u1_0.password,
+        u1_0.username 
+    from
+        users u1_0 
+    where
+        u1_0.username=?
+Hibernate: 
+    select
+        r1_0.user_id,
+        r1_0.role 
+    from
+        user_roles r1_0 
+    where
+        r1_0.user_id=?
+2026-07-13T10:06:37.340Z DEBUG 8204 --- [Url_Shortener] [io-8081-exec-10] o.s.security.web.FilterChainProxy        : Secured POST /api/v1/urls/shorten
+2026-07-13T10:06:37.345Z DEBUG 8204 --- [Url_Shortener] [io-8081-exec-10] horizationManagerBeforeMethodInterceptor : Authorizing method invocation ReflectiveMethodInvocation: public org.springframework.http.ResponseEntity com.Url_Shortener.controller.UrlMappingController.createShortUrl(com.Url_Shortener.dto.CreateShortUrlRequest,java.security.Principal); target is of class [com.Url_Shortener.controller.UrlMappingController]
+2026-07-13T10:06:37.356Z DEBUG 8204 --- [Url_Shortener] [io-8081-exec-10] horizationManagerBeforeMethodInterceptor : Authorized method invocation ReflectiveMethodInvocation: public org.springframework.http.ResponseEntity com.Url_Shortener.controller.UrlMappingController.createShortUrl(com.Url_Shortener.dto.CreateShortUrlRequest,java.security.Principal); target is of class [com.Url_Shortener.controller.UrlMappingController]
+Hibernate: 
+    select
+        u1_0.id,
+        u1_0.created_date,
+        u1_0.email,
+        u1_0.password,
+        u1_0.username 
+    from
+        users u1_0 
+    where
+        u1_0.username=?
+Hibernate: 
+    select
+        r1_0.user_id,
+        r1_0.role 
+    from
+        user_roles r1_0 
+    where
+        r1_0.user_id=?
+2026-07-13T10:06:43.214Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-9] o.s.security.web.FilterChainProxy        : Securing GET /shortUrl?shortUrl=DFS955UD
+2026-07-13T10:06:43.217Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-9] o.s.security.web.FilterChainProxy        : Secured GET /shortUrl?shortUrl=DFS955UD
+Hibernate: 
+    insert 
+    into
+        click_event
+        (click_date, ip_address, referrer, short_url, user_agent) 
+    values
+        (?, ?, ?, ?, ?)
+2026-07-13T10:06:43.256Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-9] o.s.s.w.a.AnonymousAuthenticationFilter  : Set SecurityContextHolder to anonymous SecurityContext
+2026-07-13T10:06:43.341Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-3] o.s.security.web.FilterChainProxy        : Securing GET /shortUrl?shortUrl=DFS955UD
+2026-07-13T10:06:43.341Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-3] o.s.security.web.FilterChainProxy        : Secured GET /shortUrl?shortUrl=DFS955UD
+Hibernate: 
+    insert 
+    into
+        click_event
+        (click_date, ip_address, referrer, short_url, user_agent) 
+    values
+        (?, ?, ?, ?, ?)
+2026-07-13T10:06:43.355Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-3] o.s.s.w.a.AnonymousAuthenticationFilter  : Set SecurityContextHolder to anonymous SecurityContext
+2026-07-13T10:07:03.407Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-1] o.s.security.web.FilterChainProxy        : Securing POST /api/v1/auth/public/login
+2026-07-13T10:07:03.407Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-1] o.s.security.web.FilterChainProxy        : Secured POST /api/v1/auth/public/login
+Hibernate: 
+    select
+        u1_0.id,
+        u1_0.created_date,
+        u1_0.email,
+        u1_0.password,
+        u1_0.username 
+    from
+        users u1_0 
+    where
+        u1_0.username=?
+2026-07-13T10:07:03.503Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-1] o.s.s.a.dao.DaoAuthenticationProvider    : Failed to find user 'x'
+2026-07-13T10:07:03.503Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-1] o.s.s.authentication.ProviderManager     : Authentication failed with provider DaoAuthenticationProvider since Bad credentials
+2026-07-13T10:07:03.506Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-1] o.s.s.w.a.AnonymousAuthenticationFilter  : Set SecurityContextHolder to anonymous SecurityContext
+2026-07-13T10:07:11.847Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-7] o.s.security.web.FilterChainProxy        : Securing GET /shortUrl?shortUrl=DFS955UD
+2026-07-13T10:07:11.848Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-7] o.s.security.web.FilterChainProxy        : Secured GET /shortUrl?shortUrl=DFS955UD
+Hibernate: 
+    insert 
+    into
+        click_event
+        (click_date, ip_address, referrer, short_url, user_agent) 
+    values
+        (?, ?, ?, ?, ?)
+2026-07-13T10:07:11.859Z DEBUG 8204 --- [Url_Shortener] [nio-8081-exec-7] o.s.s.w.a.AnonymousAuthenticationFilter  : Set SecurityContextHolder to anonymous SecurityContext

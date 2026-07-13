@@ -1,6 +1,7 @@
 package com.Url_Shortener.publisher;
 
 import com.Url_Shortener.event.ClickEventCreatedEvent;
+import com.Url_Shortener.metrics.UrlShortenerMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -35,9 +36,12 @@ public class KafkaAnalyticsPublisher implements AnalyticsPublisher {
     private static final String TOPIC = "analytics-events";
 
     private final KafkaTemplate<String, ClickEventCreatedEvent> kafkaTemplate;
+    private final UrlShortenerMetrics metrics;
 
-    public KafkaAnalyticsPublisher(KafkaTemplate<String, ClickEventCreatedEvent> kafkaTemplate) {
+    public KafkaAnalyticsPublisher(KafkaTemplate<String, ClickEventCreatedEvent> kafkaTemplate,
+                                    UrlShortenerMetrics metrics) {
         this.kafkaTemplate = kafkaTemplate;
+        this.metrics = metrics;
     }
 
     // OLD POSTGRES IMPLEMENTATION
@@ -49,6 +53,7 @@ public class KafkaAnalyticsPublisher implements AnalyticsPublisher {
     // NEW KAFKA IMPLEMENTATION
     @Override
     public void publish(ClickEventCreatedEvent event) {
+        var sample = metrics.startTimer();
         try {
             kafkaTemplate.send(TOPIC, event.getShortUrl(), event)
                     .whenComplete((result, ex) -> {
@@ -64,6 +69,8 @@ public class KafkaAnalyticsPublisher implements AnalyticsPublisher {
                         }
                     });
             log.debug("Event sent to Kafka: eventId={}, shortUrl={}", event.getEventId(), event.getShortUrl());
+            metrics.incrementKafkaPublished();
+            metrics.stopKafkaPublishTime(sample);
         } catch (Exception e) {
             // FIRE-AND-FORGET: Never throw to caller.
             // The redirect must not be delayed by Kafka failures.

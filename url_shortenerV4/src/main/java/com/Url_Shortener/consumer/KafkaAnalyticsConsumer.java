@@ -1,6 +1,7 @@
 package com.Url_Shortener.consumer;
 
 import com.Url_Shortener.event.ClickEventCreatedEvent;
+import com.Url_Shortener.metrics.UrlShortenerMetrics;
 import com.Url_Shortener.storage.AnalyticsStorage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,9 +42,12 @@ public class KafkaAnalyticsConsumer {
     private static final Logger log = LoggerFactory.getLogger(KafkaAnalyticsConsumer.class);
 
     private final AnalyticsStorage analyticsStorage;
+    private final UrlShortenerMetrics metrics;
 
-    public KafkaAnalyticsConsumer(AnalyticsStorage analyticsStorage) {
+    public KafkaAnalyticsConsumer(AnalyticsStorage analyticsStorage,
+                                   UrlShortenerMetrics metrics) {
         this.analyticsStorage = analyticsStorage;
+        this.metrics = metrics;
     }
 
     /**
@@ -58,6 +62,7 @@ public class KafkaAnalyticsConsumer {
     public void consume(ClickEventCreatedEvent event, Acknowledgment acknowledgment) {
         log.info("Event consumed from Kafka: eventId={}, shortUrl={}, originalUrl={}",
                 event.getEventId(), event.getShortUrl(), event.getOriginalUrl());
+        metrics.incrementKafkaConsumed();
 
         try {
             // OLD POSTGRES IMPLEMENTATION

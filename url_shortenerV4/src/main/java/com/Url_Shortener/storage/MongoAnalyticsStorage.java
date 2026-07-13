@@ -2,6 +2,7 @@ package com.Url_Shortener.storage;
 
 import com.Url_Shortener.dto.ClickEventDetailDto;
 import com.Url_Shortener.dto.ClickEventDto;
+import com.Url_Shortener.metrics.UrlShortenerMetrics;
 import com.Url_Shortener.model.ClickEventDocument;
 import com.Url_Shortener.repository.ClickEventMongoRepository;
 import org.slf4j.Logger;
@@ -34,9 +35,12 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
     private static final Logger log = LoggerFactory.getLogger(MongoAnalyticsStorage.class);
 
     private final ClickEventMongoRepository mongoRepository;
+    private final UrlShortenerMetrics metrics;
 
-    public MongoAnalyticsStorage(ClickEventMongoRepository mongoRepository) {
+    public MongoAnalyticsStorage(ClickEventMongoRepository mongoRepository,
+                                  UrlShortenerMetrics metrics) {
         this.mongoRepository = mongoRepository;
+        this.metrics = metrics;
     }
 
     // ============================================================
@@ -55,6 +59,7 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
         // clickEventRepository.save(clickEvent);
 
         // NEW MONGODB IMPLEMENTATION
+        var sample = metrics.startTimer();
         try {
             ClickEventDocument doc = new ClickEventDocument(
                     shortUrl,
@@ -64,9 +69,13 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
                     userAgent
             );
             mongoRepository.save(doc);
+            metrics.incrementMongoWrite();
+            metrics.stopMongoPersistTime(sample);
         } catch (Exception e) {
             // HOT PATH: Never throw to the caller. A failed analytics write
             // must not prevent the user from being redirected.
+            metrics.incrementMongoWriteFailure();
+            metrics.stopMongoPersistTime(sample);
             log.warn("Failed to log click event for shortUrl '{}': {}", shortUrl, e.getMessage());
         }
     }

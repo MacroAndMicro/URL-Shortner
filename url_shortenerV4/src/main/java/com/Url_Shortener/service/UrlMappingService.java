@@ -9,6 +9,7 @@ import com.Url_Shortener.dto.UrlMappingDto;
 import com.Url_Shortener.entity.UrlMapping;
 import com.Url_Shortener.entity.User;
 import com.Url_Shortener.event.ClickEventCreatedEvent;
+import com.Url_Shortener.metrics.UrlShortenerMetrics;
 import com.Url_Shortener.model.UrlMappingItem;
 import com.Url_Shortener.publisher.AnalyticsPublisher;
 import com.Url_Shortener.repository.UrlMappingDynamoRepository;
@@ -68,21 +69,27 @@ public class UrlMappingService {
     private final AnalyticsPublisher analyticsPublisher;
 
     private final CacheService cacheService;
+    private final UrlShortenerMetrics metrics;
 
     public UrlMappingService(UrlMappingDynamoRepository urlMappingRepository,
                              AnalyticsStorage analyticsStorage,
                              AnalyticsPublisher analyticsPublisher,
-                             CacheService cacheService) {
+                             CacheService cacheService,
+                             UrlShortenerMetrics metrics) {
         this.urlMappingRepository = urlMappingRepository;
         this.analyticsStorage = analyticsStorage;
         this.analyticsPublisher = analyticsPublisher;
         this.cacheService = cacheService;
+        this.metrics = metrics;
     }
 
     /**
      * Creates a new short URL for the given original URL and user.
      */
     public UrlMappingDto createShortUrl(String originalUrl, User user) {
+        var sample = metrics.startTimer();
+        metrics.incrementDynamoRead();
+        metrics.incrementDynamoWrite();
         // OLD POSTGRES: urlMappingRepository.existsByOriginalUrlAndUser(originalUrl, user)
         // NEW DYNAMODB:  Check by querying ownerId-index GSI and filtering by originalUrl
         if (urlMappingRepository.existsByOriginalUrlAndOwnerId(originalUrl, user.getId())) {
@@ -115,6 +122,8 @@ public class UrlMappingService {
         // populated on the next redirect (cache-aside pattern).
         cacheService.put(shortUrl, CachedUrlData.from(saved));
 
+        metrics.stopUrlCreationTime(sample);
+        metrics.incrementUrlCreation();
         return convertToDto(saved);
     }
 
@@ -220,6 +229,7 @@ public class UrlMappingService {
                 urlMappingRepository.findByShortUrlAndOwnerId(shortUrl, user.getId());
 
         if (optItem.isPresent()) {
+            metrics.incrementAnalyticsRequest();
             // OLD POSTGRES: clickEventRepository.findByShortUrlAndClickDateBetween(shortUrl, start, end)
             //               + groupingBy date
             // NEW MONGODB:  analyticsStorage.findAggregatedByShortUrlAndDateBetween(shortUrl, start, end)
@@ -264,20 +274,34 @@ public class UrlMappingService {
      * compatibility. The UrlMapping entity has been de-JPA-annotated.
      */
     public UrlMapping getOriginalUrl(String shortUrl, String ipAddress, String referrer, String userAgent) {
+        var totalSample = metrics.startTimer();
+        metrics.incrementRedirectRequest();
+
         // STEP 1: Try Redis cache first (silently falls back to DynamoDB on error)
+        var redisSample = metrics.startTimer();
         Optional<CachedUrlData> cached = cacheService.get(shortUrl);
+        metrics.stopRedisLookupTime(redisSample);
 
         if (cached.isPresent()) {
-            // CACHE HIT — we know the URL exists. Increment clickCount in DynamoDB
-            // and log the click event. No need to re-read DynamoDB for the mapping.
+            // CACHE HIT
+            metrics.incrementCacheHit();
             CachedUrlData data = cached.get();
+            metrics.incrementDynamoWrite();
             urlMappingRepository.incrementClickCount(shortUrl);
             logClickEvent(shortUrl, ipAddress, referrer, userAgent);
+            metrics.stopRedirectTotalTime(totalSample);
+            metrics.incrementRedirectSuccess();
             return buildUrlMappingFromCache(data);
         }
 
+        // CACHE MISS
+        metrics.incrementCacheMiss();
+
         // STEP 2: CACHE MISS or Redis unavailable — read from DynamoDB
+        metrics.incrementDynamoRead();
+        var dynamoSample = metrics.startTimer();
         Optional<UrlMappingItem> optItem = urlMappingRepository.findByShortUrl(shortUrl);
+        metrics.stopDynamoLookupTime(dynamoSample);
 
         if (optItem.isPresent()) {
             UrlMappingItem item = optItem.get();
@@ -286,12 +310,17 @@ public class UrlMappingService {
             cacheService.put(shortUrl, CachedUrlData.from(item));
 
             // Increment clickCount and log the click event
+            metrics.incrementDynamoWrite();
             urlMappingRepository.incrementClickCount(shortUrl);
             logClickEvent(shortUrl, ipAddress, referrer, userAgent);
 
+            metrics.stopRedirectTotalTime(totalSample);
+            metrics.incrementRedirectSuccess();
             return buildUrlMappingFromItem(item);
         }
 
+        metrics.stopRedirectTotalTime(totalSample);
+        metrics.incrementRedirectFailure();
         return null;
     }
 
@@ -426,6 +455,7 @@ public class UrlMappingService {
         // Best-effort — if Redis is unavailable, the TTL will expire the
         // stale entry eventually.
         cacheService.evict(item.getShortUrl());
+        metrics.incrementUrlDeletion();
     }
 
     /**

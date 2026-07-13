@@ -53,6 +53,7 @@ public class WebSecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/v1/auth/public/**").permitAll()
                         .requestMatchers("/api/v1/health").permitAll()
+                        .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/api/v1/**").authenticated()
                         .requestMatchers("/shortUrl").permitAll()
                         .requestMatchers("/{shortUrl}").permitAll()
