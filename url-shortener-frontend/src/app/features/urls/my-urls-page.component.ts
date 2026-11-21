@@ -12,8 +12,6 @@ import { environment } from '../../environments/environment';
   selector: 'app-my-urls-page',
   standalone: true,
   imports: [RouterLink, FormsModule, SlicePipe, SkeletonComponent, CopyButtonComponent],
-  templateUrl: './my-urls-page.component.html',
-  styleUrls: ['./my-urls-page.component.scss'],
   template: `
     <div class="section py-8">
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">

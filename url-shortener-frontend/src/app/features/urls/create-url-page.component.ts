@@ -9,8 +9,6 @@ import { environment } from '../../environments/environment';
   selector: 'app-create-url-page',
   standalone: true,
   imports: [ReactiveFormsModule, CopyButtonComponent],
-  templateUrl: './create-url-page.component.html',
-  styleUrls: ['./create-url-page.component.scss'],
   template: `
     <div class="section py-8">
       <h1 class="text-h2 mb-2 text-navy-900 dark:text-white">Create Short URL</h1>

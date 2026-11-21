@@ -11,8 +11,6 @@ import { environment } from '../../environments/environment';
   selector: 'app-landing-page',
   standalone: true,
   imports: [RouterLink, ReactiveFormsModule, CopyButtonComponent],
-  templateUrl: './landing-page.component.html',
-  styleUrls: ['./landing-page.component.scss'],
   template: `
     <!-- Hero -->
     <section class="relative overflow-hidden bg-gradient-to-br from-navy-900 via-navy-900 to-navy-500">

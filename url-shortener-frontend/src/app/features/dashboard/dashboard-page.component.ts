@@ -12,8 +12,6 @@ Chart.register(...registerables);
   selector: 'app-dashboard-page',
   standalone: true,
   imports: [RouterLink, DecimalPipe, StatCardComponent, SkeletonComponent],
-  templateUrl: './dashboard-page.component.html',
-  styleUrls: ['./dashboard-page.component.scss'],
   template: `
     <div class="section py-8">
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">

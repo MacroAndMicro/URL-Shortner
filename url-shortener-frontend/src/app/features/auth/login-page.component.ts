@@ -7,8 +7,32 @@ import { AuthService } from '../../core/services/auth.service';
   selector: 'app-login-page',
   standalone: true,
   imports: [RouterLink, ReactiveFormsModule],
-  templateUrl: './login-page.component.html',
-  styleUrls: ['./login-page.component.scss'],
+  template: `
+    <div class="section py-16">
+      <div class="card-elevated max-w-md mx-auto">
+        <h1 class="text-h2 mb-6 text-navy-900 dark:text-white">Sign in</h1>
+        <form [formGroup]="form" (ngSubmit)="onSubmit()" class="space-y-4">
+          <div>
+            <label for="username" class="block text-sm font-semibold text-navy-900 dark:text-white mb-1.5">Username</label>
+            <input id="username" type="text" formControlName="username" autocomplete="username" class="input-field" />
+          </div>
+          <div>
+            <label for="password" class="block text-sm font-semibold text-navy-900 dark:text-white mb-1.5">Password</label>
+            <input id="password" type="password" formControlName="password" autocomplete="current-password" class="input-field" />
+          </div>
+          @if (auth.authError()) {
+            <p class="text-sm text-red-500">{{ auth.authError() }}</p>
+          }
+          <button type="submit" [disabled]="form.invalid || auth.authLoading()" class="btn-accent w-full py-3">
+            @if (auth.authLoading()) { Signing in... } @else { Sign in }
+          </button>
+        </form>
+        <p class="text-sm text-slate-500 dark:text-slate-400 mt-6 text-center">
+          No account? <a routerLink="/register" class="text-orange-500 font-medium">Sign up free</a>
+        </p>
+      </div>
+    </div>
+  `,
 })
 export class LoginPageComponent {
   private readonly fb = inject(FormBuilder);

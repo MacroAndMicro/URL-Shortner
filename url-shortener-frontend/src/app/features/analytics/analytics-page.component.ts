@@ -14,8 +14,6 @@ Chart.register(...registerables);
   selector: 'app-analytics-page',
   standalone: true,
   imports: [FormsModule, SlicePipe, StatCardComponent, SkeletonComponent],
-  templateUrl: './analytics-page.component.html',
-  styleUrls: ['./analytics-page.component.scss'],
   template: `
     <div class="section py-8">
       <h1 class="text-h2 mb-1 text-navy-900 dark:text-white">Link Analytics</h1>
