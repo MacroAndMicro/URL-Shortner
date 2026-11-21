@@ -1,5 +1,6 @@
 package com.Url_Shortener.security;
 
+import com.Url_Shortener.shortcode.ShortCode;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -63,7 +64,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 reject(response);
                 return;
             }
-        } else if ("GET".equals(method) && path.matches("/[A-Za-z0-9]{8}")) {
+        } else if ("GET".equals(method) && ShortCode.isShortCodePath(path)) {
             if (isOverLimit("redirect", request, redirectLimit)) {
                 reject(response);
                 return;

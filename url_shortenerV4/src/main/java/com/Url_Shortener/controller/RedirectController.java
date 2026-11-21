@@ -2,6 +2,7 @@ package com.Url_Shortener.controller;
 
 import com.Url_Shortener.entity.UrlMapping;
 import com.Url_Shortener.service.UrlMappingService;
+import com.Url_Shortener.shortcode.ShortCode;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
@@ -18,7 +19,7 @@ public class RedirectController {
         this.urlMappingService = urlMappingService;
     }
 
-    @GetMapping("/{shortUrl:[A-Za-z0-9]{8}}")
+    @GetMapping(ShortCode.PATH_PATTERN)
     public ResponseEntity<Void> redirect(@PathVariable("shortUrl") String shortUrl,
                                           HttpServletRequest request){
         UrlMapping urlMapping = urlMappingService.getOriginalUrl(

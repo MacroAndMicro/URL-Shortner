@@ -5,6 +5,7 @@ import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import com.Url_Shortener.shortcode.ShortCode;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -68,7 +69,7 @@ public class WebSecurityConfig {
                         // Actuator is served on management.server.port, which is not published.
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/api/v1/**").authenticated()
-                        .requestMatchers(HttpMethod.GET, "/{shortUrl:[A-Za-z0-9]{8}}").permitAll()
+                        .requestMatchers(HttpMethod.GET, ShortCode.PATH_PATTERN).permitAll()
                         .anyRequest().authenticated()
                 );
         http.authenticationProvider(authenticationProvider());
