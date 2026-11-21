@@ -2,6 +2,7 @@ import { Component, inject, OnInit, OnDestroy, ElementRef, viewChild, effect } f
 import { RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { PlanService } from '../../core/services/plan.service';
+import { describeUsage } from '../../models/plan.model';
 import { PLAN_LABELS } from '../../models/plan.model';
 import { Chart, ChartConfiguration, registerables } from 'chart.js';
 import { AnalyticsService } from '../../core/services/analytics.service';
@@ -28,7 +29,7 @@ Chart.register(...registerables);
         <div class="card rounded-2xl mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <p class="text-sm text-slate-500 dark:text-slate-400">{{ labels[p.effectivePlan] }} plan</p>
-            <p class="text-lg font-semibold text-navy-900 dark:text-white">{{ p.activeUrls }} of {{ p.maxActiveUrls }} active links</p>
+            <p class="text-lg font-semibold text-navy-900 dark:text-white">{{ usage(p) }}</p>
             @if (p.linkLifetimeDays) {
               <p class="text-sm text-slate-500 dark:text-slate-400">Links last {{ p.linkLifetimeDays }} days.</p>
             }
@@ -114,6 +115,7 @@ Chart.register(...registerables);
 export class DashboardPageComponent implements OnInit, OnDestroy {
   analytics = inject(AnalyticsService);
   planService = inject(PlanService);
+  usage = describeUsage;
   labels = PLAN_LABELS;
   chartCanvas = viewChild<ElementRef<HTMLCanvasElement>>('chartCanvas');
   private chart: Chart | null = null;

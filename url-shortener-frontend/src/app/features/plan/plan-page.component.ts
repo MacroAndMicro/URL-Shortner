@@ -1,7 +1,7 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { PlanService } from '../../core/services/plan.service';
-import { PLAN_LABELS, PlanName } from '../../models/plan.model';
+import { PLAN_LABELS, PlanName, describeDays, describeUsage } from '../../models/plan.model';
 
 /** Shows the user's plan, what it allows, and how much of it is used. */
 @Component({
@@ -33,34 +33,54 @@ import { PLAN_LABELS, PlanName } from '../../models/plan.model';
               after that your account moves to Free.
             </div>
           }
-          @if (p.subscribedPlan !== 'FREE' && p.effectivePlan === 'FREE') {
+          @if (p.paidLinksExpireAt) {
             <div class="mb-6 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400">
-              Your {{ labels[p.subscribedPlan] }} plan lapsed on {{ p.graceEndsAt | date: 'mediumDate' }}.
-              Free plan rules now apply.
+              Your {{ labels[p.subscribedPlan] }} plan lapsed on {{ p.graceEndsAt | date: 'mediumDate' }}, so Free plan rules apply.
+              The links you made on {{ labels[p.subscribedPlan] }} stop working on
+              {{ p.paidLinksExpireAt | date: 'medium' }} and cannot be recovered after that. Renew before then to keep them.
             </div>
           }
 
           <div class="mb-6">
             <div class="flex justify-between text-sm mb-1.5">
-              <span class="font-semibold text-navy-900 dark:text-white">Active links</span>
-              <span class="text-slate-500 dark:text-slate-400">{{ p.activeUrls }} of {{ p.maxActiveUrls }}</span>
+              <span class="font-semibold text-navy-900 dark:text-white">Links</span>
+              <span class="text-slate-500 dark:text-slate-400">{{ usage(p) }}</span>
             </div>
             <div class="h-2 rounded-full bg-gray-100 dark:bg-slate-700 overflow-hidden"
-                 role="progressbar" [attr.aria-valuenow]="p.activeUrls" aria-valuemin="0" [attr.aria-valuemax]="p.maxActiveUrls">
-              <div class="h-full bg-orange-500" [style.width.%]="usagePercent(p.activeUrls, p.maxActiveUrls)"></div>
+                 role="progressbar" [attr.aria-label]="usage(p)" [attr.aria-valuenow]="p.linksUsed" aria-valuemin="0" [attr.aria-valuemax]="p.linkLimit">
+              <div class="h-full bg-orange-500" [style.width.%]="usagePercent(p.linksUsed, p.linkLimit)"></div>
             </div>
+            @if (p.limitPeriod !== 'ACTIVE' && p.periodEnd) {
+              <p class="text-xs text-slate-500 dark:text-slate-400 mt-1.5">Resets when your plan renews on {{ p.periodEnd | date: 'mediumDate' }}. Deleting a link does not give it back.</p>
+            }
           </div>
 
           <dl class="grid sm:grid-cols-3 gap-4 text-sm">
             <div>
               <dt class="text-slate-500 dark:text-slate-400">Links last</dt>
               <dd class="font-semibold text-navy-900 dark:text-white">
-                {{ p.linkLifetimeDays ? p.linkLifetimeDays + ' days' : 'Forever' }}
+                {{ p.linkLifetimeDays ? p.linkLifetimeDays + ' days' : 'While your plan is paid' }}
               </dd>
             </div>
             <div>
+              <dt class="text-slate-500 dark:text-slate-400">Change a link's destination</dt>
+              <dd class="font-semibold text-navy-900 dark:text-white">
+                {{ p.editWindowHours ? 'Within ' + p.editWindowHours + ' hours' : 'Any time' }}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-slate-500 dark:text-slate-400">Custom URLs</dt>
+              <dd class="font-semibold text-navy-900 dark:text-white">{{ p.customCodes ? 'Included' : 'Yearly plan only' }}</dd>
+            </div>
+            <div>
               <dt class="text-slate-500 dark:text-slate-400">Click analytics</dt>
-              <dd class="font-semibold text-navy-900 dark:text-white">{{ p.analytics ? 'Included' : 'Not included' }}</dd>
+              <dd class="font-semibold text-navy-900 dark:text-white">{{ p.analytics ? 'Included' : 'Paid plans only' }}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500 dark:text-slate-400">Individual clicks kept</dt>
+              <dd class="font-semibold text-navy-900 dark:text-white">
+                @if (p.analytics) { {{ days(p.clickDetailRetentionDays) }}, daily totals while the link exists } @else { — }
+              </dd>
             </div>
             <div>
               <dt class="text-slate-500 dark:text-slate-400">Redirect type</dt>
@@ -95,6 +115,8 @@ import { PLAN_LABELS, PlanName } from '../../models/plan.model';
 export class PlanPageComponent implements OnInit {
   planService = inject(PlanService);
   labels = PLAN_LABELS;
+  usage = describeUsage;
+  days = describeDays;
   switching = signal(false);
   switchError = signal<string | null>(null);
 

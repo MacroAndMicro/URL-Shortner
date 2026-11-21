@@ -11,6 +11,8 @@ export interface UrlMapping {
 
 export interface CreateUrlRequest {
   originalUrl: string;
+  /** Yearly plan only; 4 to 30 letters, digits or hyphens. */
+  customCode?: string;
 }
 
 export interface UpdateUrlRequest {

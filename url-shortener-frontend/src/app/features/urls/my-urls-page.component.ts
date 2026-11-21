@@ -3,6 +3,7 @@ import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { DatePipe, SlicePipe } from '@angular/common';
 import { PlanService } from '../../core/services/plan.service';
+import { describeUsage } from '../../models/plan.model';
 import { UrlService } from '../../core/services/url.service';
 import { SkeletonComponent } from '../../shared/components/skeleton.component';
 import { CopyButtonComponent } from '../../shared/components/copy-button.component';
@@ -21,7 +22,7 @@ import { environment } from '../../environments/environment';
           <p class="text-slate-500 dark:text-slate-400 mt-1">Manage and track all your shortened links.</p>
           @if (planService.plan(); as p) {
             <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              {{ p.activeUrls }} of {{ p.maxActiveUrls }} active links@if (p.linkLifetimeDays) {; links last {{ p.linkLifetimeDays }} days and then disappear}.
+              {{ usage(p) }}@if (p.linkLifetimeDays) {; links last {{ p.linkLifetimeDays }} days and then disappear}.
             </p>
           }
         </div>
@@ -102,6 +103,7 @@ import { environment } from '../../environments/environment';
 export class MyUrlsPageComponent implements OnInit {
   urlService = inject(UrlService);
   planService = inject(PlanService);
+  usage = describeUsage;
   /** Click counts only exist on plans with analytics. */
   showClicks = computed(() => this.planService.plan()?.analytics ?? false);
   searchTerm = '';
