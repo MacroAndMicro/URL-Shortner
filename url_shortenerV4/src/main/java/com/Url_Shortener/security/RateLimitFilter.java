@@ -59,7 +59,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 reject(response);
                 return;
             }
-        } else if ("POST".equals(method) && path.equals("/api/v1/urls/shorten")) {
+        } else if ("POST".equals(method)
+                && (path.equals("/api/v1/urls/shorten") || path.equals("/api/v1/guest/shorten"))) {
             if (isOverLimit("shorten", request, shortenLimit)) {
                 reject(response);
                 return;

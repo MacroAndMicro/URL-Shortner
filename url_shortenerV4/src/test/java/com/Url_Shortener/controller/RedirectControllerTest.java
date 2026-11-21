@@ -1,6 +1,6 @@
 package com.Url_Shortener.controller;
 
-import com.Url_Shortener.entity.UrlMapping;
+import com.Url_Shortener.service.RedirectTarget;
 import com.Url_Shortener.service.UrlMappingService;
 import com.Url_Shortener.shortcode.ShortCode;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,6 +9,8 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -32,26 +34,36 @@ class RedirectControllerTest {
     }
 
     @Test
-    void redirectsFromTheShortPath() throws Exception {
-        UrlMapping mapping = new UrlMapping();
-        mapping.setOriginalUrl("https://example.com");
-        when(service.getOriginalUrl(eq("QN7XOa0a"), any(), any(), any())).thenReturn(mapping);
+    void paidLinksRedirectWith302ThatIsNeverCached() throws Exception {
+        when(service.resolve(eq("QN7XOa0a"), any(), any(), any()))
+                .thenReturn(Optional.of(new RedirectTarget("https://example.com", false, null)));
 
         mockMvc.perform(get("/QN7XOa0a"))
                 .andExpect(status().isFound())
-                .andExpect(header().string("Location", "https://example.com"));
+                .andExpect(header().string("Location", "https://example.com"))
+                .andExpect(header().string("Cache-Control", "no-store"));
     }
 
     @Test
-    void unknownCodeIsNotFound() throws Exception {
+    void guestAndFreeLinksRedirectWith301CachedUntilExpiry() throws Exception {
+        when(service.resolve(eq("QN7XOa0a"), any(), any(), any()))
+                .thenReturn(Optional.of(new RedirectTarget("https://example.com", true, 3600L)));
+
+        mockMvc.perform(get("/QN7XOa0a"))
+                .andExpect(status().isMovedPermanently())
+                .andExpect(header().string("Location", "https://example.com"))
+                .andExpect(header().string("Cache-Control", "max-age=3600, public"));
+    }
+
+    @Test
+    void unknownOrExpiredCodeIsNotFound() throws Exception {
         mockMvc.perform(get("/AAAAAAAA")).andExpect(status().isNotFound());
     }
 
     @Test
     void redirectsSnowflakeAndCustomStyleCodes() throws Exception {
-        UrlMapping mapping = new UrlMapping();
-        mapping.setOriginalUrl("https://example.com");
-        when(service.getOriginalUrl(any(), any(), any(), any())).thenReturn(mapping);
+        when(service.resolve(any(), any(), any(), any()))
+                .thenReturn(Optional.of(new RedirectTarget("https://example.com", false, null)));
 
         for (String code : new String[]{"1b2C3d4E5f", "1b2C3d4E5fG", "my-link", "my_link"}) {
             mockMvc.perform(get("/" + code)).andExpect(status().isFound());

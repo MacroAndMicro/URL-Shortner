@@ -320,7 +320,8 @@ public class UrlMappingDynamoRepository {
      */
     public Optional<UrlMappingItem> findByShortUrlAndOwnerId(String shortUrl, Long ownerId) {
         Optional<UrlMappingItem> item = findByShortUrl(shortUrl);
-        return item.filter(i -> i.getOwnerId().equals(ownerId));
+        // Guest links have no owner.
+        return item.filter(i -> ownerId.equals(i.getOwnerId()));
     }
 
     // ============================================================
@@ -353,15 +354,16 @@ public class UrlMappingDynamoRepository {
      * @param pageSize          Maximum items per page
      * @param lastEvaluatedKey  Token from previous page (null for first page)
      * @param ascending         true = oldest first, false = newest first
+     * @param createdAfter      only items created after this ISO date-time; null for all
      * @return DynamoPageResult containing items and the next page token
      */
     public DynamoPageResult<UrlMappingItem> findByOwnerIdPaginated(Long ownerId, int pageSize,
                                                                     Map<String, String> lastEvaluatedKey,
-                                                                    boolean ascending) {
+                                                                    boolean ascending,
+                                                                    String createdAfter) {
         var iterable = urlMappingTable.index("ownerId-index")
                 .query(r -> {
-                    r.queryConditional(QueryConditional.keyEqualTo(
-                                    Key.builder().partitionValue(ownerId).build()))
+                    r.queryConditional(ownerCondition(ownerId, createdAfter))
                             .limit(pageSize)
                             .scanIndexForward(ascending);
                     if (lastEvaluatedKey != null && !lastEvaluatedKey.isEmpty()) {
@@ -392,6 +394,15 @@ public class UrlMappingDynamoRepository {
         return new DynamoPageResult<>(items, nextKey);
     }
 
+    /** ownerId-index condition, narrowed by the createdDate sort key when given. */
+    private static QueryConditional ownerCondition(Long ownerId, String createdAfter) {
+        if (createdAfter == null) {
+            return QueryConditional.keyEqualTo(Key.builder().partitionValue(ownerId).build());
+        }
+        return QueryConditional.sortGreaterThan(
+                Key.builder().partitionValue(ownerId).sortValue(createdAfter).build());
+    }
+
     private Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValue> toExclusiveStartKey(
             Long ownerId, Map<String, String> lastEvaluatedKey) {
         String createdDate = lastEvaluatedKey.get("createdDate");
@@ -413,25 +424,28 @@ public class UrlMappingDynamoRepository {
     // ============================================================
 
     /**
-     * Finds the user's existing mapping for a URL with one index query and
-     * one key read, independent of how many URLs the user has.
+     * Finds the user's mappings for a URL with one index query plus a key
+     * read per match, independent of how many URLs the user has. Usually
+     * there is at most one; there can be more when an earlier link expired
+     * and a new one was made, so the caller picks the one still active.
      *
      * The index is updated asynchronously, so a mapping created a moment ago
      * may not be found yet; the caller then creates a second link, which is
      * harmless.
      */
-    public Optional<UrlMappingItem> findByOwnerAndOriginalUrl(Long ownerId, String originalUrl) {
+    public List<UrlMappingItem> findByOwnerAndOriginalUrl(Long ownerId, String originalUrl) {
         QueryConditional condition = QueryConditional.keyEqualTo(
                 Key.builder().partitionValue(UrlMappingItem.ownerUrlKey(ownerId, originalUrl)).build());
         return urlMappingTable.index(OWNER_URL_INDEX)
-                .query(r -> r.queryConditional(condition).limit(1))
+                .query(r -> r.queryConditional(condition))
                 .stream()
                 .flatMap(page -> page.items().stream())
-                .findFirst()
-                .flatMap(keys -> findByShortUrl(keys.getShortUrl()))
+                .map(keys -> findByShortUrl(keys.getShortUrl()))
+                .flatMap(Optional::stream)
                 // Guards against an index entry that lags an edit or delete.
                 .filter(item -> ownerId.equals(item.getOwnerId())
-                        && originalUrl.equals(item.getOriginalUrl()));
+                        && originalUrl.equals(item.getOriginalUrl()))
+                .collect(Collectors.toList());
     }
 
     // ============================================================
@@ -457,7 +471,8 @@ public class UrlMappingDynamoRepository {
      */
     public Optional<UrlMappingItem> findByIdAndOwnerId(Long id, Long ownerId) {
         Optional<UrlMappingItem> item = findById(id);
-        return item.filter(i -> i.getOwnerId().equals(ownerId));
+        // Guest links have no owner.
+        return item.filter(i -> ownerId.equals(i.getOwnerId()));
     }
 
     // ============================================================
@@ -468,14 +483,38 @@ public class UrlMappingDynamoRepository {
      * Counts the number of URL mappings belonging to a user.
      */
     public long countByOwnerId(Long ownerId) {
-        QueryConditional condition = QueryConditional.keyEqualTo(
-                Key.builder().partitionValue(ownerId).build()
-        );
-        return urlMappingTable.index("ownerId-index")
-                .query(r -> r.queryConditional(condition))
-                .stream()
-                .flatMap(page -> page.items().stream())
-                .count();
+        return countByOwnerId(ownerId, null);
+    }
+
+    /**
+     * Counts a user's mappings created after createdAfter (all when null).
+     * Asks DynamoDB for the count only, so no items are transferred.
+     */
+    public long countByOwnerId(Long ownerId, String createdAfter) {
+        Map<String, AttributeValue> values = new HashMap<>();
+        values.put(":owner", AttributeValue.builder().n(ownerId.toString()).build());
+        String keyCondition = "ownerId = :owner";
+        if (createdAfter != null) {
+            values.put(":after", AttributeValue.builder().s(createdAfter).build());
+            keyCondition += " AND createdDate > :after";
+        }
+
+        long total = 0;
+        Map<String, AttributeValue> startKey = null;
+        do {
+            QueryResponse page = dynamoDbClient.query(QueryRequest.builder()
+                    .tableName(tableName)
+                    .indexName("ownerId-index")
+                    .keyConditionExpression(keyCondition)
+                    .expressionAttributeValues(values)
+                    .select(Select.COUNT)
+                    .exclusiveStartKey(startKey)
+                    .build());
+            total += page.count();
+            startKey = page.hasLastEvaluatedKey() && !page.lastEvaluatedKey().isEmpty()
+                    ? page.lastEvaluatedKey() : null;
+        } while (startKey != null);
+        return total;
     }
 
     // ============================================================

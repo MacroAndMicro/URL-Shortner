@@ -1,5 +1,6 @@
 package com.Url_Shortener.entity;
 
+import com.Url_Shortener.plan.Plan;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Email;
@@ -41,6 +42,30 @@ public class User  {
     private Set<String> roles = new HashSet<>();
 
     private LocalDateTime createdDate = LocalDateTime.now();
+
+    /** The subscribed plan; see PlanService for the plan actually in effect. */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private Plan plan = Plan.FREE;
+
+    /** End of the paid period; null for FREE. */
+    private LocalDateTime planPeriodEnd;
+
+    public Plan getPlan() {
+        return plan;
+    }
+
+    public void setPlan(Plan plan) {
+        this.plan = plan;
+    }
+
+    public LocalDateTime getPlanPeriodEnd() {
+        return planPeriodEnd;
+    }
+
+    public void setPlanPeriodEnd(LocalDateTime planPeriodEnd) {
+        this.planPeriodEnd = planPeriodEnd;
+    }
 
    // private String role = "ROLE_USER";
 

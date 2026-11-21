@@ -93,6 +93,18 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(HttpStatus.CONFLICT.value(), message));
     }
 
+    @ExceptionHandler(LimitExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleLimitExceeded(LimitExceededException ex) {
+        return ResponseEntity.status(ex.getStatus())
+                .body(ApiResponse.error(ex.getStatus().value(), ex.getMessage()));
+    }
+
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleServiceUnavailable(ServiceUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE.value(), ex.getMessage()));
+    }
+
     @ExceptionHandler(SdkClientException.class)
     public ResponseEntity<ApiResponse<Void>> handleDynamoDbUnavailable(SdkClientException ex) {
         log.error("DynamoDB is unavailable: {}", ex.getMessage());

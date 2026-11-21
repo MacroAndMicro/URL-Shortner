@@ -64,8 +64,20 @@ class ApplicationSmokeTest {
 
         HttpResponse<String> redirect = get("/" + created.get("shortUrl").asText(), null);
 
-        assertThat(redirect.statusCode()).isEqualTo(302);
+        // New users are on the Free plan, which redirects with 301.
+        assertThat(redirect.statusCode()).isEqualTo(301);
         assertThat(redirect.headers().firstValue("Location")).contains("https://example.com/a");
+    }
+
+    @Test
+    void guestLinksAreRefusedWhileRedisIsDown() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/guest/shorten"))
+                .header("Content-Type", "application/json")
+                .header("X-Guest-Id", UUID.randomUUID().toString())
+                .POST(HttpRequest.BodyPublishers.ofString("{\"originalUrl\":\"https://example.com/g\"}"))
+                .build();
+
+        assertThat(http.send(request, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(503);
     }
 
     @Test

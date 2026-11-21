@@ -76,6 +76,13 @@ app:
   # can hand out the same short code.
   snowflake:
     worker-id: ${SNOWFLAKE_WORKER_ID:0}
+  guest:
+    # Guest links per IP address per day, on top of one active link per browser.
+    ip-daily-limit: ${GUEST_IP_DAILY_LIMIT:10}
+  dev:
+    # Lets signed-in users change their own plan without paying, via
+    # POST /api/v1/account/plan/dev. Never enable in production.
+    plan-switch-enabled: ${DEV_PLAN_SWITCH_ENABLED:false}
   cache:
     redis:
       ttl-hours: ${REDIS_CACHE_TTL_HOURS:24}

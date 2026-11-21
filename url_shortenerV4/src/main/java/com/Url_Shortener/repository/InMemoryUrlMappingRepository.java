@@ -57,13 +57,13 @@ public class InMemoryUrlMappingRepository extends UrlMappingDynamoRepository {
     @Override
     public Optional<UrlMappingItem> findByShortUrlAndOwnerId(String shortUrl, Long ownerId) {
         return findByShortUrl(shortUrl)
-                .filter(i -> i.getOwnerId().equals(ownerId));
+                .filter(i -> ownerId.equals(i.getOwnerId()));
     }
 
     @Override
     public List<UrlMappingItem> findByOwnerId(Long ownerId) {
         return store.values().stream()
-                .filter(i -> i.getOwnerId().equals(ownerId))
+                .filter(i -> ownerId.equals(i.getOwnerId()))
                 .sorted((a, b) -> b.getCreatedDate().compareTo(a.getCreatedDate()))
                 .collect(Collectors.toList());
     }
@@ -71,9 +71,11 @@ public class InMemoryUrlMappingRepository extends UrlMappingDynamoRepository {
     @Override
     public DynamoPageResult<UrlMappingItem> findByOwnerIdPaginated(Long ownerId, int pageSize,
                                                                     Map<String, String> lastEvaluatedKey,
-                                                                    boolean ascending) {
+                                                                    boolean ascending,
+                                                                    String createdAfter) {
         List<UrlMappingItem> all = store.values().stream()
-                .filter(i -> i.getOwnerId().equals(ownerId))
+                .filter(i -> ownerId.equals(i.getOwnerId()))
+                .filter(i -> createdAfter == null || i.getCreatedDate().compareTo(createdAfter) > 0)
                 .sorted((a, b) -> ascending
                         ? a.getCreatedDate().compareTo(b.getCreatedDate())
                         : b.getCreatedDate().compareTo(a.getCreatedDate()))
@@ -98,10 +100,10 @@ public class InMemoryUrlMappingRepository extends UrlMappingDynamoRepository {
     }
 
     @Override
-    public Optional<UrlMappingItem> findByOwnerAndOriginalUrl(Long ownerId, String originalUrl) {
+    public List<UrlMappingItem> findByOwnerAndOriginalUrl(Long ownerId, String originalUrl) {
         return store.values().stream()
                 .filter(i -> ownerId.equals(i.getOwnerId()) && originalUrl.equals(i.getOriginalUrl()))
-                .findFirst();
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -114,13 +116,19 @@ public class InMemoryUrlMappingRepository extends UrlMappingDynamoRepository {
     @Override
     public Optional<UrlMappingItem> findByIdAndOwnerId(Long id, Long ownerId) {
         return findById(id)
-                .filter(i -> i.getOwnerId().equals(ownerId));
+                .filter(i -> ownerId.equals(i.getOwnerId()));
     }
 
     @Override
     public long countByOwnerId(Long ownerId) {
+        return countByOwnerId(ownerId, null);
+    }
+
+    @Override
+    public long countByOwnerId(Long ownerId, String createdAfter) {
         return store.values().stream()
-                .filter(i -> i.getOwnerId().equals(ownerId))
+                .filter(i -> ownerId.equals(i.getOwnerId()))
+                .filter(i -> createdAfter == null || i.getCreatedDate().compareTo(createdAfter) > 0)
                 .count();
     }
 

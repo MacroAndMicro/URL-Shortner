@@ -5,7 +5,7 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.LocalDateTime;
 
 public class UrlMappingDto {
-    // IDs are random 63-bit values, which exceed JavaScript's safe integer range.
+    // IDs are 63-bit Snowflake values, which exceed JavaScript's safe integer range.
     @JsonFormat(shape = JsonFormat.Shape.STRING)
     private Long id;
     private String originalUrl;
@@ -13,6 +13,16 @@ public class UrlMappingDto {
     private int clickCount;
     private LocalDateTime createdDate;
     private String username;
+    /** When the link stops working; null if it never expires. */
+    private LocalDateTime expiresAt;
+
+    public LocalDateTime getExpiresAt() {
+        return expiresAt;
+    }
+
+    public void setExpiresAt(LocalDateTime expiresAt) {
+        this.expiresAt = expiresAt;
+    }
 
     public Long getId() {
         return id;

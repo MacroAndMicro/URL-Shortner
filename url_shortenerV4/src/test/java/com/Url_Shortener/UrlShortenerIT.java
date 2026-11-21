@@ -79,6 +79,9 @@ class UrlShortenerIT {
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
         registry.add("spring.data.redis.host", REDIS::getHost);
         registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
+        registry.add("app.dev.plan-switch-enabled", () -> "true");
+        // Every test registers and logs in from the same address.
+        registry.add("app.rate-limit.auth-per-minute", () -> "1000");
         registry.add("dynamodb.endpoint",
                 () -> "http://" + DYNAMODB.getHost() + ":" + DYNAMODB.getMappedPort(8000));
     }
@@ -113,6 +116,7 @@ class UrlShortenerIT {
 
     @Test
     void clickFlowsFromRedirectThroughKafkaToMongoAndDynamoDb() throws Exception {
+        changePlan("MONTHLY");
         JsonNode created = shorten("https://example.com/flow");
         String code = created.get("shortUrl").asText();
 
@@ -174,6 +178,65 @@ class UrlShortenerIT {
     }
 
     @Test
+    void freeUsersGetCached301RedirectsAndNoAnalytics() throws Exception {
+        JsonNode created = shorten("https://example.com/free");
+        assertThat(created.get("expiresAt").isNull()).isFalse();
+
+        HttpResponse<String> redirect = get("/" + created.get("shortUrl").asText(), null);
+        assertThat(redirect.statusCode()).isEqualTo(301);
+        assertThat(redirect.headers().firstValue("Location")).contains("https://example.com/free");
+        assertThat(redirect.headers().firstValue("Cache-Control").orElseThrow()).matches("max-age=\\d+, public");
+
+        assertThat(get("/api/v1/urls/dashboard", token).statusCode()).isEqualTo(403);
+
+        JsonNode plan = data(get("/api/v1/account/plan", token));
+        assertThat(plan.get("effectivePlan").asText()).isEqualTo("FREE");
+        assertThat(plan.get("maxActiveUrls").asInt()).isEqualTo(50);
+        assertThat(plan.get("activeUrls").asInt()).isEqualTo(1);
+        assertThat(plan.get("redirectStatus").asInt()).isEqualTo(301);
+    }
+
+    @Test
+    void upgradingSwitchesExistingLinksTo302AndUnlocksAnalytics() throws Exception {
+        JsonNode created = shorten("https://example.com/upgrade");
+
+        JsonNode plan = changePlan("YEARLY");
+        assertThat(plan.get("effectivePlan").asText()).isEqualTo("YEARLY");
+        assertThat(plan.get("maxActiveUrls").asInt()).isEqualTo(500);
+
+        assertThat(get("/" + created.get("shortUrl").asText(), null).statusCode()).isEqualTo(302);
+        assertThat(get("/api/v1/urls/dashboard", token).statusCode()).isEqualTo(200);
+        JsonNode mine = data(get("/api/v1/urls/myurls", token));
+        assertThat(mine.get("content").get(0).get("expiresAt").isNull()).isTrue();
+    }
+
+    @Test
+    void lapsedPlanFallsBackToFreeAfterTheGracePeriod() throws Exception {
+        JsonNode inGrace = changePlan("MONTHLY", LocalDateTime.now().minusDays(3));
+        assertThat(inGrace.get("effectivePlan").asText()).isEqualTo("MONTHLY");
+        assertThat(inGrace.get("inGracePeriod").asBoolean()).isTrue();
+
+        JsonNode lapsed = changePlan("MONTHLY", LocalDateTime.now().minusDays(8));
+        assertThat(lapsed.get("subscribedPlan").asText()).isEqualTo("MONTHLY");
+        assertThat(lapsed.get("effectivePlan").asText()).isEqualTo("FREE");
+    }
+
+    @Test
+    void guestsGetOneLinkPerBrowser() throws Exception {
+        String guestId = UUID.randomUUID().toString();
+
+        JsonNode created = data(guestShorten("https://example.com/guest", guestId));
+        assertThat(created.get("expiresAt").isNull()).isFalse();
+        assertThat(get("/" + created.get("shortUrl").asText(), null).statusCode()).isEqualTo(301);
+
+        HttpResponse<String> second = guestShorten("https://example.com/guest-2", guestId);
+        assertThat(second.statusCode()).isEqualTo(403);
+        assertThat(second.body()).contains("Sign up");
+
+        assertThat(guestShorten("https://example.com/guest", null).statusCode()).isEqualTo(400);
+    }
+
+    @Test
     void missingTokenIsUnauthorized() throws Exception {
         assertThat(get("/api/v1/urls/myurls", null).statusCode()).isEqualTo(401);
     }
@@ -216,6 +279,25 @@ class UrlShortenerIT {
 
     private JsonNode shorten(String url) throws Exception {
         return data(post("/api/v1/urls/shorten", Map.of("originalUrl", url), token));
+    }
+
+    private JsonNode changePlan(String plan) throws Exception {
+        return data(post("/api/v1/account/plan/dev", Map.of("plan", plan), token));
+    }
+
+    private JsonNode changePlan(String plan, LocalDateTime periodEnd) throws Exception {
+        return data(post("/api/v1/account/plan/dev",
+                Map.of("plan", plan, "periodEnd", periodEnd.withNano(0).toString()), token));
+    }
+
+    private HttpResponse<String> guestShorten(String url, String guestId) throws Exception {
+        HttpRequest.Builder builder = request("/api/v1/guest/shorten", null)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(Map.of("originalUrl", url))));
+        if (guestId != null) {
+            builder.header("X-Guest-Id", guestId);
+        }
+        return http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private JsonNode data(HttpResponse<String> response) throws Exception {

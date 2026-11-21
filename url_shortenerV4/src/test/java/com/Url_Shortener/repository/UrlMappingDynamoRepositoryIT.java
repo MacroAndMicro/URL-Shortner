@@ -64,9 +64,9 @@ class UrlMappingDynamoRepositoryIT {
         assertThat(repository.tryEnsureTableExists()).isTrue();
 
         assertThat(repository.findByOwnerAndOriginalUrl(7L, "https://example.com/old"))
-                .map(UrlMappingItem::getShortUrl).contains("legacy0001");
+                .extracting(UrlMappingItem::getShortUrl).containsExactly("legacy0001");
         assertThat(repository.findByOwnerAndOriginalUrl(8L, "https://example.com/old"))
-                .map(UrlMappingItem::getShortUrl).contains("legacy0002");
+                .extracting(UrlMappingItem::getShortUrl).containsExactly("legacy0002");
         assertThat(repository.findByOwnerAndOriginalUrl(7L, "https://example.com/other")).isEmpty();
 
         // Running again on an already upgraded table is a no-op.
@@ -86,13 +86,13 @@ class UrlMappingDynamoRepositoryIT {
         item.setCreatedDate("2026-11-21T10:00:00");
         assertThat(repository.saveIfNotExists(item)).isTrue();
 
-        assertThat(repository.findByOwnerAndOriginalUrl(7L, "https://example.com/a")).isPresent();
+        assertThat(repository.findByOwnerAndOriginalUrl(7L, "https://example.com/a")).hasSize(1);
 
         repository.updateOriginalUrl("abc1234567", "https://example.com/b",
                 UrlMappingItem.ownerUrlKey(7L, "https://example.com/b"), "2026-11-21T11:00:00");
 
         assertThat(repository.findByOwnerAndOriginalUrl(7L, "https://example.com/a")).isEmpty();
-        assertThat(repository.findByOwnerAndOriginalUrl(7L, "https://example.com/b")).isPresent();
+        assertThat(repository.findByOwnerAndOriginalUrl(7L, "https://example.com/b")).hasSize(1);
     }
 
     private void createTableWithoutOwnerUrlIndex() {
