@@ -117,7 +117,7 @@ class UrlMappingServiceTest {
 
     @Test
     void createUsesTheBase62SnowflakeIdAsTheShortCode() {
-        when(repository.findByOwnerId(1L)).thenReturn(List.of());
+        when(repository.findByOwnerAndOriginalUrl(1L, TARGET)).thenReturn(Optional.empty());
         when(repository.saveIfNotExists(any())).thenReturn(true);
 
         UrlMappingDto dto = service.createShortUrl(TARGET, user);
@@ -127,8 +127,24 @@ class UrlMappingServiceTest {
     }
 
     @Test
+    void createStoresTheDuplicateLookupKeyWithoutLoadingTheUsersUrls() {
+        when(repository.findByOwnerAndOriginalUrl(1L, TARGET)).thenReturn(Optional.empty());
+        when(repository.saveIfNotExists(any())).thenReturn(true);
+
+        service.createShortUrl(TARGET, user);
+
+        ArgumentCaptor<UrlMappingItem> saved = ArgumentCaptor.forClass(UrlMappingItem.class);
+        verify(repository).saveIfNotExists(saved.capture());
+        assertThat(saved.getValue().getOwnerUrlKey())
+                .isEqualTo(UrlMappingItem.ownerUrlKey(1L, TARGET))
+                .startsWith("1#")
+                .hasSize(2 + 64);
+        verify(repository, never()).findByOwnerId(any());
+    }
+
+    @Test
     void createRetriesWithANewCodeOnCollision() {
-        when(repository.findByOwnerId(1L)).thenReturn(List.of());
+        when(repository.findByOwnerAndOriginalUrl(1L, TARGET)).thenReturn(Optional.empty());
         when(repository.saveIfNotExists(any())).thenReturn(false, true);
 
         ArgumentCaptor<UrlMappingItem> saved = ArgumentCaptor.forClass(UrlMappingItem.class);
@@ -141,7 +157,7 @@ class UrlMappingServiceTest {
 
     @Test
     void createFailsAfterRepeatedCollisions() {
-        when(repository.findByOwnerId(1L)).thenReturn(List.of());
+        when(repository.findByOwnerAndOriginalUrl(1L, TARGET)).thenReturn(Optional.empty());
         when(repository.saveIfNotExists(any())).thenReturn(false);
 
         assertThatThrownBy(() -> service.createShortUrl(TARGET, user))
@@ -150,7 +166,7 @@ class UrlMappingServiceTest {
 
     @Test
     void createReturnsExistingMappingForSameUrl() {
-        when(repository.findByOwnerId(1L)).thenReturn(List.of(item(CODE, 3)));
+        when(repository.findByOwnerAndOriginalUrl(1L, TARGET)).thenReturn(Optional.of(item(CODE, 3)));
 
         assertThat(service.createShortUrl(TARGET, user).getShortUrl()).isEqualTo(CODE);
         verify(repository, never()).saveIfNotExists(any());
@@ -159,7 +175,7 @@ class UrlMappingServiceTest {
     @Test
     void updateWritesOnlyTheUrlAttributes() {
         when(repository.findByIdAndOwnerId(42L, 1L)).thenReturn(Optional.of(item(CODE, 7)));
-        when(repository.updateOriginalUrl(eq(CODE), eq("https://new.example"), any())).thenReturn(true);
+        when(repository.updateOriginalUrl(eq(CODE), eq("https://new.example"), eq(UrlMappingItem.ownerUrlKey(1L, "https://new.example")), any())).thenReturn(true);
 
         UrlMappingDto dto = service.updateUrl(42L, "https://new.example", user);
 

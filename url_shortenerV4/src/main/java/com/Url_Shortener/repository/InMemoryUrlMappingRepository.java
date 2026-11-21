@@ -98,6 +98,13 @@ public class InMemoryUrlMappingRepository extends UrlMappingDynamoRepository {
     }
 
     @Override
+    public Optional<UrlMappingItem> findByOwnerAndOriginalUrl(Long ownerId, String originalUrl) {
+        return store.values().stream()
+                .filter(i -> ownerId.equals(i.getOwnerId()) && originalUrl.equals(i.getOriginalUrl()))
+                .findFirst();
+    }
+
+    @Override
     public Optional<UrlMappingItem> findById(Long id) {
         return store.values().stream()
                 .filter(i -> i.getId().equals(id))
@@ -131,9 +138,11 @@ public class InMemoryUrlMappingRepository extends UrlMappingDynamoRepository {
     }
 
     @Override
-    public boolean updateOriginalUrl(String shortUrl, String originalUrl, String updatedDate) {
+    public boolean updateOriginalUrl(String shortUrl, String originalUrl, String ownerUrlKey,
+                                     String updatedDate) {
         return store.computeIfPresent(shortUrl, (k, v) -> {
             v.setOriginalUrl(originalUrl);
+            v.setOwnerUrlKey(ownerUrlKey);
             v.setUpdatedDate(updatedDate);
             return v;
         }) != null;

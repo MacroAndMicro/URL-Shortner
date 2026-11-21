@@ -134,6 +134,19 @@ class UrlShortenerIT {
     }
 
     @Test
+    void shorteningTheSameUrlTwiceReturnsTheSameLink() throws Exception {
+        JsonNode first = shorten("https://example.com/same");
+        assertThat(first.get("shortUrl").asText()).matches("[0-9A-Za-z]{10,11}");
+
+        // DynamoDB Local updates indexes synchronously; real DynamoDB may lag briefly.
+        JsonNode second = shorten("https://example.com/same");
+        JsonNode other = shorten("https://example.com/different");
+
+        assertThat(second.get("shortUrl").asText()).isEqualTo(first.get("shortUrl").asText());
+        assertThat(other.get("shortUrl").asText()).isNotEqualTo(first.get("shortUrl").asText());
+    }
+
+    @Test
     void paginatesPastTheFirstPage() throws Exception {
         for (int i = 0; i < 25; i++) {
             shorten("https://example.com/page/" + i);

@@ -31,10 +31,13 @@ import java.util.stream.Collectors;
  *   PK:  shortUrl (String)
  *   GSI ownerId-index:  ownerId (PK) + createdDate (SK)
  *   GSI id-index:       id (PK)
+ *   GSI ownerUrl-index: ownerUrlKey (PK), keys only
  */
 @Repository
 @ConditionalOnProperty(name = "dynamodb.enabled", havingValue = "true", matchIfMissing = true)
 public class UrlMappingDynamoRepository {
+
+    static final String OWNER_URL_INDEX = "ownerUrl-index";
 
     private final DynamoDbTable<UrlMappingItem> urlMappingTable;
     private final DynamoDbClient dynamoDbClient;
@@ -76,10 +79,12 @@ public class UrlMappingDynamoRepository {
         initThread.start();
     }
 
-    private boolean tryEnsureTableExists() {
+    boolean tryEnsureTableExists() {
         try {
-            dynamoDbClient.describeTable(r -> r.tableName(tableName));
+            TableDescription table = dynamoDbClient.describeTable(r -> r.tableName(tableName)).table();
             System.out.println("INFO: DynamoDB table '" + tableName + "' already exists.");
+            ensureOwnerUrlIndex(table);
+            backfillOwnerUrlKeys();
             return true;
         } catch (ResourceNotFoundException e) {
             try {
@@ -125,7 +130,8 @@ public class UrlMappingDynamoRepository {
                         AttributeDefinition.builder()
                                 .attributeName("id")
                                 .attributeType(ScalarAttributeType.N)
-                                .build()
+                                .build(),
+                        ownerUrlKeyDefinition()
                 )
                 .globalSecondaryIndexes(
                         GlobalSecondaryIndex.builder()
@@ -163,13 +169,107 @@ public class UrlMappingDynamoRepository {
                                         .readCapacityUnits(5L)
                                         .writeCapacityUnits(5L)
                                         .build())
-                                .build()
+                                .build(),
+                        ownerUrlIndex()
                 )
                 .provisionedThroughput(ProvisionedThroughput.builder()
                         .readCapacityUnits(5L)
                         .writeCapacityUnits(5L)
                         .build())
                 .build());
+    }
+
+    private static AttributeDefinition ownerUrlKeyDefinition() {
+        return AttributeDefinition.builder()
+                .attributeName("ownerUrlKey")
+                .attributeType(ScalarAttributeType.S)
+                .build();
+    }
+
+    private static GlobalSecondaryIndex ownerUrlIndex() {
+        return GlobalSecondaryIndex.builder()
+                .indexName(OWNER_URL_INDEX)
+                .keySchema(KeySchemaElement.builder()
+                        .attributeName("ownerUrlKey")
+                        .keyType(KeyType.HASH)
+                        .build())
+                // Only the short code is needed; the full item is then read by key.
+                .projection(Projection.builder()
+                        .projectionType(ProjectionType.KEYS_ONLY)
+                        .build())
+                .provisionedThroughput(ProvisionedThroughput.builder()
+                        .readCapacityUnits(5L)
+                        .writeCapacityUnits(5L)
+                        .build())
+                .build();
+    }
+
+    /**
+     * Adds ownerUrl-index to a table created before the index existed.
+     */
+    private void ensureOwnerUrlIndex(TableDescription table) {
+        boolean present = table.hasGlobalSecondaryIndexes() && table.globalSecondaryIndexes().stream()
+                .anyMatch(gsi -> OWNER_URL_INDEX.equals(gsi.indexName()));
+        if (present) {
+            return;
+        }
+        GlobalSecondaryIndex gsi = ownerUrlIndex();
+        dynamoDbClient.updateTable(UpdateTableRequest.builder()
+                .tableName(tableName)
+                .attributeDefinitions(ownerUrlKeyDefinition())
+                .globalSecondaryIndexUpdates(GlobalSecondaryIndexUpdate.builder()
+                        .create(CreateGlobalSecondaryIndexAction.builder()
+                                .indexName(gsi.indexName())
+                                .keySchema(gsi.keySchema())
+                                .projection(gsi.projection())
+                                .provisionedThroughput(gsi.provisionedThroughput())
+                                .build())
+                        .build())
+                .build());
+        System.out.println("INFO: Added index '" + OWNER_URL_INDEX + "' to DynamoDB table '" + tableName + "'.");
+    }
+
+    /**
+     * Sets ownerUrlKey on items written before the attribute existed, so the
+     * duplicate check also finds them. Safe to run repeatedly: items that
+     * already have the key are skipped.
+     */
+    private void backfillOwnerUrlKeys() {
+        int updated = 0;
+        Map<String, AttributeValue> startKey = null;
+        do {
+            ScanResponse page = dynamoDbClient.scan(ScanRequest.builder()
+                    .tableName(tableName)
+                    .filterExpression("attribute_not_exists(ownerUrlKey) "
+                            + "AND attribute_exists(ownerId) AND attribute_exists(originalUrl)")
+                    .projectionExpression("shortUrl, ownerId, originalUrl")
+                    .exclusiveStartKey(startKey)
+                    .build());
+            for (Map<String, AttributeValue> row : page.items()) {
+                String key = UrlMappingItem.ownerUrlKey(
+                        Long.valueOf(row.get("ownerId").n()), row.get("originalUrl").s());
+                try {
+                    dynamoDbClient.updateItem(UpdateItemRequest.builder()
+                            .tableName(tableName)
+                            .key(Map.of("shortUrl", row.get("shortUrl")))
+                            .updateExpression("SET ownerUrlKey = :k")
+                            // Skip items deleted or edited since the scan.
+                            .conditionExpression("attribute_exists(shortUrl) AND originalUrl = :u")
+                            .expressionAttributeValues(Map.of(
+                                    ":k", AttributeValue.builder().s(key).build(),
+                                    ":u", row.get("originalUrl")))
+                            .build());
+                    updated++;
+                } catch (ConditionalCheckFailedException ignored) {
+                    // Changed since the scan; a later write sets the key itself.
+                }
+            }
+            startKey = page.hasLastEvaluatedKey() && !page.lastEvaluatedKey().isEmpty()
+                    ? page.lastEvaluatedKey() : null;
+        } while (startKey != null);
+        if (updated > 0) {
+            System.out.println("INFO: Set ownerUrlKey on " + updated + " existing URL mappings.");
+        }
     }
 
     // ============================================================
@@ -309,6 +409,32 @@ public class UrlMappingDynamoRepository {
     }
 
     // ============================================================
+    // READ BY OWNER + URL (GSI: ownerUrl-index)
+    // ============================================================
+
+    /**
+     * Finds the user's existing mapping for a URL with one index query and
+     * one key read, independent of how many URLs the user has.
+     *
+     * The index is updated asynchronously, so a mapping created a moment ago
+     * may not be found yet; the caller then creates a second link, which is
+     * harmless.
+     */
+    public Optional<UrlMappingItem> findByOwnerAndOriginalUrl(Long ownerId, String originalUrl) {
+        QueryConditional condition = QueryConditional.keyEqualTo(
+                Key.builder().partitionValue(UrlMappingItem.ownerUrlKey(ownerId, originalUrl)).build());
+        return urlMappingTable.index(OWNER_URL_INDEX)
+                .query(r -> r.queryConditional(condition).limit(1))
+                .stream()
+                .flatMap(page -> page.items().stream())
+                .findFirst()
+                .flatMap(keys -> findByShortUrl(keys.getShortUrl()))
+                // Guards against an index entry that lags an edit or delete.
+                .filter(item -> ownerId.equals(item.getOwnerId())
+                        && originalUrl.equals(item.getOriginalUrl()));
+    }
+
+    // ============================================================
     // READ BY ID (GSI: id-index)
     // ============================================================
 
@@ -400,18 +526,22 @@ public class UrlMappingDynamoRepository {
      *
      * @return true if updated, false if the mapping no longer exists
      */
-    public boolean updateOriginalUrl(String shortUrl, String originalUrl, String updatedDate) {
+    public boolean updateOriginalUrl(String shortUrl, String originalUrl, String ownerUrlKey,
+                                     String updatedDate) {
         try {
             dynamoDbClient.updateItem(UpdateItemRequest.builder()
                     .tableName(tableName)
                     .key(Map.of("shortUrl",
                             software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
                                     .s(shortUrl).build()))
-                    .updateExpression("SET originalUrl = :originalUrl, updatedDate = :updatedDate")
+                    .updateExpression("SET originalUrl = :originalUrl, ownerUrlKey = :ownerUrlKey, "
+                            + "updatedDate = :updatedDate")
                     .conditionExpression("attribute_exists(shortUrl)")
                     .expressionAttributeValues(Map.of(
                             ":originalUrl", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
                                     .s(originalUrl).build(),
+                            ":ownerUrlKey", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                                    .s(ownerUrlKey).build(),
                             ":updatedDate", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
                                     .s(updatedDate).build()))
                     .build());

@@ -4,6 +4,7 @@ import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbBean;
 import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbPartitionKey;
 import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbSecondaryPartitionKey;
 import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbSecondarySortKey;
+import com.Url_Shortener.security.Sha256;
 
 /**
  * ============================================================
@@ -23,6 +24,14 @@ import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbSecon
  * GSI: id-index
  *   Partition Key: id (Long)
  *   Purpose:       Lookup by numeric ID for REST API {id} endpoints
+ *
+ * GSI: ownerUrl-index
+ *   Partition Key: ownerUrlKey (String - "ownerId#sha256(originalUrl)")
+ *   Purpose:       Find whether a user already shortened a URL with one
+ *                  small query, however many URLs they have. The URL is
+ *                  hashed because index keys are size-limited and URLs
+ *                  can be 2048 characters. Items without the attribute
+ *                  (e.g. custom codes) are simply not in the index.
  */
 @DynamoDbBean
 public class UrlMappingItem {
@@ -35,8 +44,14 @@ public class UrlMappingItem {
     private Integer clickCount;
     private String createdDate;
     private String updatedDate;
+    private String ownerUrlKey;
 
     public UrlMappingItem() {
+    }
+
+    /** The ownerUrl-index key for a user and a URL. */
+    public static String ownerUrlKey(Long ownerId, String originalUrl) {
+        return ownerId + "#" + Sha256.hex(originalUrl);
     }
 
     @DynamoDbPartitionKey
@@ -105,5 +120,14 @@ public class UrlMappingItem {
 
     public void setUpdatedDate(String updatedDate) {
         this.updatedDate = updatedDate;
+    }
+
+    @DynamoDbSecondaryPartitionKey(indexNames = {"ownerUrl-index"})
+    public String getOwnerUrlKey() {
+        return ownerUrlKey;
+    }
+
+    public void setOwnerUrlKey(String ownerUrlKey) {
+        this.ownerUrlKey = ownerUrlKey;
     }
 }

@@ -83,9 +83,8 @@ public class UrlMappingService {
     public UrlMappingDto createShortUrl(String originalUrl, User user) {
         var sample = metrics.startTimer();
         metrics.incrementDynamoRead();
-        Optional<UrlMappingItem> existing = urlMappingRepository.findByOwnerId(user.getId()).stream()
-                .filter(m -> m.getOriginalUrl().equals(originalUrl))
-                .findFirst();
+        Optional<UrlMappingItem> existing =
+                urlMappingRepository.findByOwnerAndOriginalUrl(user.getId(), originalUrl);
         if (existing.isPresent()) {
             metrics.stopUrlCreationTime(sample);
             return convertToDto(existing.get());
@@ -94,6 +93,7 @@ public class UrlMappingService {
         UrlMappingItem item = new UrlMappingItem();
         item.setOriginalUrl(originalUrl);
         item.setOwnerId(user.getId());
+        item.setOwnerUrlKey(UrlMappingItem.ownerUrlKey(user.getId(), originalUrl));
         item.setOwnerUsername(user.getUsername());
         item.setClickCount(0);
         String now = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
@@ -320,10 +320,12 @@ public class UrlMappingService {
 
         if (newOriginalUrl != null && !newOriginalUrl.isBlank()) {
             String now = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-            if (!urlMappingRepository.updateOriginalUrl(item.getShortUrl(), newOriginalUrl, now)) {
+            String ownerUrlKey = UrlMappingItem.ownerUrlKey(user.getId(), newOriginalUrl);
+            if (!urlMappingRepository.updateOriginalUrl(item.getShortUrl(), newOriginalUrl, ownerUrlKey, now)) {
                 throw new UrlMappingNotFoundException("URL mapping not found or access denied");
             }
             item.setOriginalUrl(newOriginalUrl);
+            item.setOwnerUrlKey(ownerUrlKey);
             item.setUpdatedDate(now);
 
             // Best-effort: on failure the old target is served until the TTL expires.
