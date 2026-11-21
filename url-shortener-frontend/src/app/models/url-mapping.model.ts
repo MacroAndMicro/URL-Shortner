@@ -7,6 +7,8 @@ export interface UrlMapping {
   username: string;
   /** When the link stops working; null if it never expires. */
   expiresAt: string | null;
+  /** Until when the destination can be changed; null if any time. */
+  editableUntil: string | null;
 }
 
 export interface CreateUrlRequest {

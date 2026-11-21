@@ -1,7 +1,7 @@
-import { Component, inject, OnInit, computed } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DatePipe, SlicePipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { PlanService } from '../../core/services/plan.service';
 import { describeUsage } from '../../models/plan.model';
 import { UrlService } from '../../core/services/url.service';
@@ -13,127 +13,243 @@ import { environment } from '../../environments/environment';
 @Component({
   selector: 'app-my-urls-page',
   standalone: true,
-  imports: [RouterLink, FormsModule, DatePipe, SlicePipe, SkeletonComponent, CopyButtonComponent],
+  imports: [RouterLink, FormsModule, DatePipe, SkeletonComponent, CopyButtonComponent],
   template: `
-    <div class="section py-8">
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+    <div class="section py-10">
+      <div class="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <h1 class="text-h2 text-navy-900 dark:text-white">My URLs</h1>
-          <p class="text-slate-500 dark:text-slate-400 mt-1">Manage and track all your shortened links.</p>
           @if (planService.plan(); as p) {
-            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              {{ usage(p) }}@if (p.linkLifetimeDays) {; links last {{ p.linkLifetimeDays }} days and then disappear}.
+            <p class="mt-1 text-slate-500 dark:text-slate-400">
+              {{ usage(p) }}@if (p.linkLifetimeDays) {. Links last {{ p.linkLifetimeDays }} days}.
             </p>
           }
         </div>
-        <a routerLink="/urls/create" class="btn-accent">+ Create New</a>
+        <a routerLink="/urls/create" class="btn-accent">Create link</a>
       </div>
 
-      <div class="flex flex-col sm:flex-row gap-3 mb-6">
-        <input type="text" [(ngModel)]="searchTerm" (input)="updateFilter()" placeholder="Search URLs..." class="input-field max-w-xs" />
-        <select [(ngModel)]="direction" (change)="changeDirection()" class="input-field max-w-[200px]">
-          <option value="desc">Newest First</option>
-          <option value="asc">Oldest First</option>
+      <div class="mb-5 flex flex-col gap-3 sm:flex-row">
+        <label for="url-search" class="sr-only">Search links</label>
+        <input id="url-search" type="search" [ngModel]="search()" (ngModelChange)="search.set($event)"
+               placeholder="Search this page by link or destination" class="input-field sm:max-w-sm" />
+        <label for="url-order" class="sr-only">Order</label>
+        <select id="url-order" [(ngModel)]="direction" (change)="changeDirection()" class="input-field sm:max-w-[12rem]">
+          <option value="desc">Newest first</option>
+          <option value="asc">Oldest first</option>
         </select>
       </div>
 
       @if (urlService.loading()) {
-        <div class="card rounded-2xl space-y-3">
-          @for (i of [1,2,3,4,5]; track i) { <app-skeleton height="40px" /> }
+        <div class="card space-y-3">
+          @for (i of [1, 2, 3, 4]; track i) { <app-skeleton height="56px" /> }
         </div>
-      } @else if (displayUrls().length === 0 && !searchTerm) {
-        <div class="card-elevated text-center py-16">
-          <div class="text-5xl mb-4">📭</div>
-          <h3 class="text-h3 text-navy-900 dark:text-white mb-2">No URLs yet</h3>
-          <p class="text-slate-500 dark:text-slate-400 mb-6">Create your first short link to get started.</p>
-          <a routerLink="/urls/create" class="btn-accent inline-block">Create URL</a>
+      } @else if (urlService.error()) {
+        <div class="alert-error" role="alert">{{ urlService.error() }}</div>
+      } @else if (urlService.urls().length === 0) {
+        <div class="card-elevated py-14 text-center">
+          <h2 class="text-h3 text-navy-900 dark:text-white">No links yet</h2>
+          <p class="mt-1 mb-6 text-slate-500 dark:text-slate-400">Create your first short link to see it here.</p>
+          <a routerLink="/urls/create" class="btn-accent">Create link</a>
         </div>
       } @else {
-        <div class="card rounded-2xl overflow-x-auto">
-          <table class="w-full text-sm [&_td]:px-3 [&_th]:px-3 [&_td:first-child]:pl-0 [&_th:first-child]:pl-0 [&_td:last-child]:pr-0 [&_th:last-child]:pr-0">
-            <thead>
-              <tr class="border-b border-gray-100 dark:border-slate-700 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                <th class="pb-3">Short URL</th><th class="pb-3 hidden sm:table-cell">Original</th>@if (showClicks()) {<th class="pb-3 text-right">Clicks</th>}<th class="pb-3 hidden sm:table-cell">Created</th>@if (!showClicks()) {<th class="pb-3">Expires</th>}<th class="pb-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (url of displayUrls(); track url.id) {
-                <tr class="border-b border-gray-50 dark:border-slate-800 last:border-0 hover:bg-navy-50 dark:hover:bg-slate-800/50 transition-colors">
-                  <td class="py-3">
-                    <div class="flex items-center gap-2">
-                      <code class="font-mono text-orange-500 font-medium text-xs">{{ url.shortUrl }}</code>
-                      <app-copy-button [text]="baseUrl + '/' + url.shortUrl" />
-                    </div>
-                  </td>
-                  <td class="py-3 text-slate-500 dark:text-slate-400 max-w-[200px] truncate hidden sm:table-cell text-xs">{{ url.originalUrl }}</td>
-                  @if (showClicks()) {
-                    <td class="py-3 text-right font-bold text-navy-900 dark:text-white">{{ url.clickCount }}</td>
-                  }
-                  <td class="py-3 text-xs text-slate-400 hidden sm:table-cell">{{ url.createdDate | slice:0:10 }}</td>
-                  @if (!showClicks()) {
-                    <td class="py-3 text-xs text-slate-500 dark:text-slate-400">{{ url.expiresAt ? (url.expiresAt | date: 'MMM d, HH:mm') : 'Never' }}</td>
-                  }
-                  <td class="py-3 text-right">
-                    <div class="flex gap-2 justify-end">
-                      @if (showClicks()) {
-                        <a [routerLink]="['/analytics', url.shortUrl]" class="text-xs font-medium text-navy-500 dark:text-navy-200 hover:text-orange-500 transition-colors">Stats</a>
-                      }
-                      <button (click)="deleteUrl(url)" class="text-xs font-medium text-red-500 hover:text-red-700 transition-colors">Delete</button>
-                    </div>
-                  </td>
-                </tr>
-              }
-            </tbody>
-          </table>
+        @if (displayUrls().length === 0) {
+          <p class="card text-center text-sm text-slate-500 dark:text-slate-400">No links on this page match "{{ search() }}".</p>
+        }
+        <ul class="space-y-3">
+          @for (url of displayUrls(); track url.id) {
+            <li class="card">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <a [href]="link(url)" target="_blank" rel="noopener"
+                       class="truncate font-semibold text-orange-600 hover:underline dark:text-orange-400">{{ host }}/{{ url.shortUrl }}</a>
+                    <app-copy-button [text]="link(url)" />
+                  </div>
+                  <p class="mt-1 truncate text-sm text-slate-600 dark:text-slate-300" [title]="url.originalUrl">{{ url.originalUrl }}</p>
+                  <p class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Created {{ url.createdDate | date: 'MMM d, y, h:mm a' }}</span>
+                    @if (url.expiresAt) {
+                      <span>Expires {{ url.expiresAt | date: 'MMM d, h:mm a' }}</span>
+                    }
+                    @if (showClicks()) {
+                      <span class="font-medium text-slate-700 dark:text-slate-200">{{ url.clickCount }} {{ url.clickCount === 1 ? 'click' : 'clicks' }}</span>
+                    }
+                    @if (url.editableUntil && canEdit(url)) {
+                      <span>Editable for {{ timeLeft(url.editableUntil) }}</span>
+                    }
+                  </p>
+                </div>
 
-          @if (pagination(); as p) {
-            <div class="flex justify-between items-center mt-4 pt-4 border-t border-gray-100 dark:border-slate-700">
-              <p class="text-xs text-slate-500 dark:text-slate-400">Showing {{ (pageIndex * p.size) + 1 }}–{{ min((pageIndex + 1) * p.size, p.totalElements) }} of {{ p.totalElements }}</p>
-              <div class="flex gap-2">
-                <button [disabled]="pageIndex === 0" (click)="previousPage()" class="px-3 py-1.5 rounded-md text-xs font-medium border border-gray-200 dark:border-slate-600 text-navy-900 dark:text-white hover:bg-navy-50 dark:hover:bg-slate-700 disabled:opacity-30 transition-colors">← Prev</button>
-                <button [disabled]="!p.nextCursor || (pageIndex + 1) * p.size >= p.totalElements" (click)="nextPage(p.nextCursor)" class="px-3 py-1.5 rounded-md text-xs font-medium border border-gray-200 dark:border-slate-600 text-navy-900 dark:text-white hover:bg-navy-50 dark:hover:bg-slate-700 disabled:opacity-30 transition-colors">Next →</button>
+                <div class="flex shrink-0 gap-2">
+                  @if (canEdit(url)) {
+                    <button type="button" class="btn-outline !px-3 !py-1.5 !text-xs" (click)="startEdit(url)"
+                            [attr.aria-expanded]="editingId() === url.id" [attr.aria-controls]="'edit-' + url.id">Edit</button>
+                  }
+                  @if (showClicks()) {
+                    <a [routerLink]="['/analytics', url.shortUrl]" class="btn-outline !px-3 !py-1.5 !text-xs">Stats</a>
+                  }
+                  <button type="button" class="btn-ghost !px-3 !py-1.5 !text-xs !text-red-600 dark:!text-red-400" (click)="deleteUrl(url)">Delete</button>
+                </div>
               </div>
-            </div>
+
+              @if (editingId() === url.id) {
+                <form [id]="'edit-' + url.id" class="mt-4 border-t border-slate-200 pt-4 dark:border-slate-700" (ngSubmit)="saveEdit(url)">
+                  <label [for]="'edit-input-' + url.id" class="field-label">Send this link to</label>
+                  <div class="flex flex-col gap-2 sm:flex-row">
+                    <input [id]="'edit-input-' + url.id" type="url" name="destination" class="input-field"
+                           [ngModel]="draft()" (ngModelChange)="draft.set($event)" required />
+                    <div class="flex gap-2">
+                      <button type="submit" class="btn-accent" [disabled]="saving() || !validDraft()">
+                        @if (saving()) { Saving… } @else { Save }
+                      </button>
+                      <button type="button" class="btn-ghost" (click)="cancelEdit()">Cancel</button>
+                    </div>
+                  </div>
+                  @if (!validDraft()) {
+                    <p class="mt-1.5 text-sm text-red-600 dark:text-red-400">Enter a link that starts with http:// or https://</p>
+                  }
+                  @if (editError()) {
+                    <p class="mt-2 alert-error" role="alert">{{ editError() }}</p>
+                  }
+                </form>
+              }
+            </li>
           }
-        </div>
+        </ul>
+
+        @if (urlService.pagination(); as p) {
+          <div class="mt-5 flex items-center justify-between">
+            <p class="text-sm text-slate-500 dark:text-slate-400">
+              Showing {{ pageIndex * p.size + 1 }}–{{ min((pageIndex + 1) * p.size, p.totalElements) }} of {{ p.totalElements }}
+            </p>
+            <div class="flex gap-2">
+              <button type="button" class="btn-outline !py-1.5" [disabled]="pageIndex === 0" (click)="previousPage()">Previous</button>
+              <button type="button" class="btn-outline !py-1.5" [disabled]="!p.nextCursor || (pageIndex + 1) * p.size >= p.totalElements" (click)="nextPage(p.nextCursor)">Next</button>
+            </div>
+          </div>
+        }
       }
     </div>
   `,
 })
-export class MyUrlsPageComponent implements OnInit {
+export class MyUrlsPageComponent implements OnInit, OnDestroy {
   urlService = inject(UrlService);
   planService = inject(PlanService);
   usage = describeUsage;
+  host = environment.baseRedirectUrl.replace(/^https?:\/\//, '');
+
   /** Click counts only exist on plans with analytics. */
   showClicks = computed(() => this.planService.plan()?.analytics ?? false);
-  searchTerm = '';
-  direction = 'desc';
-  pageIndex = 0;
-  // Cursor for each visited page; the API only returns the next one, so Prev replays these.
-  private cursors: (string | null)[] = [null];
-  baseUrl = environment.baseRedirectUrl;
 
+  search = signal('');
   displayUrls = computed(() => {
+    const term = this.search().trim().toLowerCase();
     const urls = this.urlService.urls();
-    if (!this.searchTerm) return urls;
-    const term = this.searchTerm.toLowerCase();
-    return urls.filter((u: UrlMapping) => u.originalUrl.toLowerCase().includes(term) || u.shortUrl.toLowerCase().includes(term));
+    return term
+      ? urls.filter((u: UrlMapping) => u.originalUrl.toLowerCase().includes(term) || u.shortUrl.toLowerCase().includes(term))
+      : urls;
   });
 
-  ngOnInit(): void { this.planService.fetchPlan(); this.loadUrls(); }
+  direction = 'desc';
+  pageIndex = 0;
+  // Cursor for each visited page; the API only returns the next one, so Previous replays these.
+  private cursors: (string | null)[] = [null];
 
-  loadUrls(): void { this.urlService.getMyUrls(this.cursors[this.pageIndex], 20, this.direction); }
-  updateFilter(): void {}
-  changeDirection(): void { this.cursors = [null]; this.pageIndex = 0; this.loadUrls(); }
-  nextPage(cursor: string | null): void { this.pageIndex++; this.cursors[this.pageIndex] = cursor; this.loadUrls(); }
-  previousPage(): void { this.pageIndex--; this.loadUrls(); }
-  pagination() { return this.urlService.pagination(); }
-  min(a: number, b: number): number { return Math.min(a, b); }
+  editingId = signal<string | null>(null);
+  draft = signal('');
+  saving = signal(false);
+  editError = signal<string | null>(null);
+  validDraft = computed(() => /^https?:\/\/.+/.test(this.draft().trim()));
+
+  /** Re-evaluated every 30 s so Edit buttons disappear when their window closes. */
+  private now = signal(Date.now());
+  private timer = setInterval(() => this.now.set(Date.now()), 30_000);
+
+  ngOnInit(): void {
+    this.planService.fetchPlan();
+    this.loadUrls();
+  }
+
+  ngOnDestroy(): void {
+    clearInterval(this.timer);
+  }
+
+  link(url: UrlMapping): string {
+    return `${environment.baseRedirectUrl}/${url.shortUrl}`;
+  }
+
+  canEdit(url: UrlMapping): boolean {
+    return !url.editableUntil || new Date(url.editableUntil).getTime() > this.now();
+  }
+
+  /** e.g. "2 h 14 min" or "9 min". */
+  timeLeft(until: string): string {
+    const minutes = Math.max(0, Math.floor((new Date(until).getTime() - this.now()) / 60_000));
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return h > 0 ? `${h} h ${m} min` : `${m} min`;
+  }
+
+  startEdit(url: UrlMapping): void {
+    this.editingId.set(url.id);
+    this.draft.set(url.originalUrl);
+    this.editError.set(null);
+  }
+
+  cancelEdit(): void {
+    this.editingId.set(null);
+    this.editError.set(null);
+  }
+
+  saveEdit(url: UrlMapping): void {
+    if (!this.validDraft()) return;
+    this.saving.set(true);
+    this.editError.set(null);
+    this.urlService.updateUrl(url.id, { originalUrl: this.draft().trim() }).subscribe({
+      next: (res) => {
+        this.urlService.urls.update((list) => list.map((u) => (u.id === url.id ? res.data : u)));
+        this.saving.set(false);
+        this.editingId.set(null);
+      },
+      error: (err) => {
+        // e.g. the edit window closed while the form was open.
+        this.editError.set(err.error?.message ?? 'Could not save the change.');
+        this.saving.set(false);
+      },
+    });
+  }
+
+  loadUrls(): void {
+    this.urlService.getMyUrls(this.cursors[this.pageIndex], 20, this.direction);
+  }
+
+  changeDirection(): void {
+    this.cursors = [null];
+    this.pageIndex = 0;
+    this.loadUrls();
+  }
+
+  nextPage(cursor: string | null): void {
+    this.pageIndex++;
+    this.cursors[this.pageIndex] = cursor;
+    this.loadUrls();
+  }
+
+  previousPage(): void {
+    this.pageIndex--;
+    this.loadUrls();
+  }
+
+  min(a: number, b: number): number {
+    return Math.min(a, b);
+  }
 
   deleteUrl(url: UrlMapping): void {
-    if (confirm(`Delete short URL "${url.shortUrl}"?`)) {
-      this.urlService.deleteUrl(url.id).subscribe(() => this.loadUrls());
+    if (confirm(`Delete ${this.host}/${url.shortUrl}? This cannot be undone.`)) {
+      this.urlService.deleteUrl(url.id).subscribe(() => {
+        this.loadUrls();
+        this.planService.fetchPlan();
+      });
     }
   }
 }
-

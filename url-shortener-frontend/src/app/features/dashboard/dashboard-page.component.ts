@@ -1,13 +1,16 @@
-import { Component, inject, OnInit, OnDestroy, ElementRef, viewChild, effect } from '@angular/core';
+import { Component, ElementRef, OnDestroy, OnInit, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { PlanService } from '../../core/services/plan.service';
-import { describeUsage } from '../../models/plan.model';
-import { PLAN_LABELS } from '../../models/plan.model';
-import { Chart, ChartConfiguration, registerables } from 'chart.js';
+import { Chart, registerables } from 'chart.js';
 import { AnalyticsService } from '../../core/services/analytics.service';
+import { PlanService } from '../../core/services/plan.service';
+import { ThemeService } from '../../core/services/theme.service';
+import { UrlService } from '../../core/services/url.service';
+import { PLAN_LABELS, describeUsage } from '../../models/plan.model';
 import { StatCardComponent } from '../../shared/components/stat-card.component';
 import { SkeletonComponent } from '../../shared/components/skeleton.component';
+import { dayLabel, daysBetween, lineChart } from '../../shared/charts/chart-style';
+import { environment } from '../../environments/environment';
 
 Chart.register(...registerables);
 
@@ -16,98 +19,149 @@ Chart.register(...registerables);
   standalone: true,
   imports: [RouterLink, DecimalPipe, DatePipe, StatCardComponent, SkeletonComponent],
   template: `
-    <div class="section py-8">
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+    <div class="section py-10">
+      <div class="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <h1 class="text-h2 text-navy-900 dark:text-white">Dashboard</h1>
-          <p class="text-slate-500 dark:text-slate-400 mt-1">Overview of your link performance.</p>
+          <p class="mt-1 text-slate-500 dark:text-slate-400">Your links at a glance.</p>
         </div>
-        <a routerLink="/urls/create" class="btn-accent">+ Create New Link</a>
+        <a routerLink="/urls/create" class="btn-accent">Create link</a>
       </div>
 
       @if (planService.plan(); as p) {
-        <div class="card rounded-2xl mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <p class="text-sm text-slate-500 dark:text-slate-400">{{ labels[p.effectivePlan] }} plan</p>
-            <p class="text-lg font-semibold text-navy-900 dark:text-white">{{ usage(p) }}</p>
-            @if (p.linkLifetimeDays) {
-              <p class="text-sm text-slate-500 dark:text-slate-400">Links last {{ p.linkLifetimeDays }} days.</p>
-            }
-            @if (p.inGracePeriod) {
-              <p class="text-sm text-orange-600 dark:text-orange-400">Payment overdue: pay by {{ p.graceEndsAt | date: 'mediumDate' }} to keep your plan.</p>
-            }
-          </div>
-          <a routerLink="/plan" class="btn-outline text-sm">View plan</a>
-        </div>
-
-        @if (!p.analytics) {
-          <div class="card-elevated text-center py-12">
-            <h3 class="text-h3 text-navy-900 dark:text-white mb-2">Click analytics are on paid plans</h3>
-            <p class="text-slate-500 dark:text-slate-400 mb-6">The Monthly and Yearly plans count every click and show where your visitors come from.</p>
-            <a routerLink="/urls" class="btn-accent inline-block">Go to my links</a>
-          </div>
+        @if (p.inGracePeriod) {
+          <p class="alert-warning mb-6" role="status">
+            Your payment is overdue. Pay by {{ p.graceEndsAt | date: 'mediumDate' }} to keep your {{ labels[p.subscribedPlan] }} plan.
+          </p>
         }
-      }
+        @if (p.paidLinksExpireAt) {
+          <p class="alert-error mb-6" role="status">
+            Your {{ labels[p.subscribedPlan] }} plan has lapsed. The links you made on it stop working on
+            {{ p.paidLinksExpireAt | date: 'medium' }} unless you renew. <a routerLink="/plan" class="font-semibold underline">View plan</a>
+          </p>
+        }
 
-      @if (!planService.plan()?.analytics) {
-        <!-- Analytics not available on this plan (or the plan is still loading). -->
-      } @else if (analytics.loading()) {
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          @for (i of [1,2,3,4]; track i) {
-            <div class="card rounded-2xl"><app-skeleton height="80px" /></div>
-          }
-        </div>
-      } @else if (analytics.dashboard(); as d) {
-        @if (d.totalUrls === 0) {
-          <div class="card-elevated text-center py-16">
-            <div class="text-5xl mb-4">🔗</div>
-            <h3 class="text-h3 text-navy-900 dark:text-white mb-2">No URLs yet</h3>
-            <p class="text-slate-500 dark:text-slate-400 mb-6">Create your first short link to start tracking analytics.</p>
-            <a routerLink="/urls/create" class="btn-accent inline-block">Create Your First Link</a>
-          </div>
-        } @else {
-          <!-- Stat cards -->
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            <app-stat-card label="Total URLs" [value]="(d.totalUrls | number) ?? '0'" icon="🔗" accent="blue" />
-            <app-stat-card label="Total Clicks" [value]="(d.totalClicks | number) ?? '0'" icon="👆" accent="orange" />
-            <app-stat-card label="Clicks Today" [value]="(d.clicksToday | number) ?? '0'" icon="📅" accent="green" />
-            <app-stat-card label="This Week" [value]="(d.clicksThisWeek | number) ?? '0'" icon="📈" accent="purple" />
-          </div>
-
-          <!-- Chart -->
-          <div class="card rounded-2xl mb-8">
-            <h3 class="text-h3 mb-4 text-navy-900 dark:text-white">Clicks Over Time</h3>
-            <div class="h-64">
-              <canvas #chartCanvas></canvas>
+        <!-- Plan and usage -->
+        <div class="card mb-6">
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-slate-500 dark:text-slate-400">{{ labels[p.effectivePlan] }} plan</p>
+              <p class="mt-0.5 text-lg font-semibold text-slate-900 dark:text-white">{{ usage(p) }}</p>
+              <div class="mt-3 h-2 max-w-md overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
+                   role="progressbar" [attr.aria-label]="usage(p)" [attr.aria-valuenow]="p.linksUsed" aria-valuemin="0" [attr.aria-valuemax]="p.linkLimit">
+                <div class="h-full rounded-full bg-orange-500" [style.width.%]="percent(p.linksUsed, p.linkLimit)"></div>
+              </div>
             </div>
+            <a routerLink="/plan" class="btn-outline shrink-0">View plan</a>
           </div>
+        </div>
 
-          <!-- Top URLs -->
-          <div class="card rounded-2xl">
-            <h3 class="text-h3 mb-4 text-navy-900 dark:text-white">Top Performing Links</h3>
-            <div class="overflow-x-auto">
-              <table class="w-full text-sm [&_td]:px-3 [&_th]:px-3 [&_td:first-child]:pl-0 [&_th:first-child]:pl-0 [&_td:last-child]:pr-0 [&_th:last-child]:pr-0">
-                <thead>
-                  <tr class="border-b border-gray-100 dark:border-slate-700 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                    <th class="pb-3">Short URL</th><th class="pb-3 hidden sm:table-cell">Original</th><th class="pb-3 text-right">Clicks</th><th class="pb-3 text-right"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (url of d.topUrls; track url.id) {
-                    <tr class="border-b border-gray-50 dark:border-slate-800 last:border-0 hover:bg-navy-50 dark:hover:bg-slate-800/50 transition-colors">
-                      <td class="py-3 font-mono text-orange-500 font-medium text-xs">{{ url.shortUrl }}</td>
-                      <td class="py-3 text-slate-500 dark:text-slate-400 max-w-[200px] truncate hidden sm:table-cell text-xs">{{ url.originalUrl }}</td>
-                      <td class="py-3 text-right font-bold text-navy-900 dark:text-white">{{ url.clickCount | number }}</td>
-                      <td class="py-3 text-right">
-                        <a [routerLink]="['/analytics', url.shortUrl]" class="text-xs font-medium text-navy-500 dark:text-navy-200 hover:text-orange-500 transition-colors">View →</a>
-                      </td>
-                    </tr>
+        @if (p.analytics) {
+          @if (analytics.loading() || !analytics.dashboard()) {
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              @for (i of [1, 2, 3]; track i) { <div class="card"><app-skeleton height="64px" /></div> }
+            </div>
+          } @else if (analytics.dashboard(); as d) {
+            <div class="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <app-stat-card label="Total clicks" [value]="(d.totalClicks | number) ?? '0'" [comparison]="'Across ' + d.totalUrls + (d.totalUrls === 1 ? ' link' : ' links')" />
+              <app-stat-card label="Clicks today" [value]="(d.clicksToday | number) ?? '0'" />
+              <app-stat-card label="Last 7 days" [value]="(d.clicksThisWeek | number) ?? '0'" />
+            </div>
+
+            <!-- Clicks over time -->
+            <section class="card mb-6" aria-labelledby="clicks-title">
+              <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h2 id="clicks-title" class="text-h3 text-navy-900 dark:text-white">Clicks per day</h2>
+                <div class="inline-flex rounded-lg border border-slate-200 p-0.5 dark:border-slate-700" role="group" aria-label="Time range">
+                  @for (r of ranges; track r) {
+                    <button type="button" (click)="setRange(r)" [attr.aria-pressed]="range() === r"
+                            class="rounded-md px-3 py-1 text-sm font-medium transition-colors"
+                            [class]="range() === r
+                              ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                              : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'">
+                      {{ r }} days
+                    </button>
                   }
+                </div>
+              </div>
+              <div class="h-64">
+                <canvas #chartCanvas role="img" [attr.aria-label]="chartSummary()"></canvas>
+              </div>
+              <table class="sr-only">
+                <caption>Clicks per day, last {{ range() }} days</caption>
+                <thead><tr><th scope="col">Day</th><th scope="col">Clicks</th></tr></thead>
+                <tbody>
+                  @for (row of series(); track row.day) { <tr><td>{{ row.day }}</td><td>{{ row.count }}</td></tr> }
                 </tbody>
               </table>
-            </div>
+            </section>
+
+            <!-- Top links -->
+            <section class="card" aria-labelledby="top-title">
+              <h2 id="top-title" class="text-h3 mb-4 text-navy-900 dark:text-white">Top links</h2>
+              @if (d.topUrls.length === 0) {
+                <p class="text-sm text-slate-500 dark:text-slate-400">No links yet.</p>
+              } @else {
+                <ol class="space-y-4">
+                  @for (url of d.topUrls; track url.id) {
+                    <li>
+                      <div class="flex items-baseline justify-between gap-4">
+                        <a [routerLink]="['/analytics', url.shortUrl]" class="min-w-0 truncate font-medium text-slate-900 hover:text-orange-600 dark:text-white dark:hover:text-orange-400">
+                          {{ host }}/{{ url.shortUrl }}
+                        </a>
+                        <span class="shrink-0 text-sm font-semibold text-slate-900 dark:text-white">{{ url.clickCount | number }}</span>
+                      </div>
+                      <p class="truncate text-xs text-slate-500 dark:text-slate-400">{{ url.originalUrl }}</p>
+                      <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800" aria-hidden="true">
+                        <div class="h-full rounded-full bg-orange-500" [style.width.%]="percent(url.clickCount, topMax())"></div>
+                      </div>
+                    </li>
+                  }
+                </ol>
+              }
+            </section>
+          }
+        } @else {
+          <!-- Plans without analytics -->
+          <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+            <section class="card" aria-labelledby="recent-title">
+              <div class="mb-4 flex items-center justify-between">
+                <h2 id="recent-title" class="text-h3 text-navy-900 dark:text-white">Recent links</h2>
+                <a routerLink="/urls" class="text-sm font-medium text-orange-600 hover:underline dark:text-orange-400">All links</a>
+              </div>
+              @if (urlService.urls().length === 0) {
+                <p class="text-sm text-slate-500 dark:text-slate-400">No links yet. <a routerLink="/urls/create" class="font-medium text-orange-600 dark:text-orange-400">Create one</a>.</p>
+              } @else {
+                <ul class="divide-y divide-slate-200 dark:divide-slate-700">
+                  @for (url of urlService.urls().slice(0, 5); track url.id) {
+                    <li class="py-3 first:pt-0 last:pb-0">
+                      <p class="truncate font-medium text-slate-900 dark:text-white">{{ host }}/{{ url.shortUrl }}</p>
+                      <p class="truncate text-xs text-slate-500 dark:text-slate-400">{{ url.originalUrl }}</p>
+                      @if (url.expiresAt) {
+                        <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Expires {{ url.expiresAt | date: 'MMM d, h:mm a' }}</p>
+                      }
+                    </li>
+                  }
+                </ul>
+              }
+            </section>
+
+            <aside class="card border-dashed" aria-labelledby="locked-title">
+              <h2 id="locked-title" class="text-h3 text-navy-900 dark:text-white">Click analytics</h2>
+              <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">On the Monthly and Yearly plans you can see:</p>
+              <ul class="mt-3 space-y-1.5 text-sm text-slate-700 dark:text-slate-300">
+                <li>Clicks per day for every link</li>
+                <li>Where visitors came from</li>
+                <li>Which browsers they used</li>
+              </ul>
+              <a routerLink="/plan" class="btn-outline mt-5 w-full">See plans</a>
+            </aside>
           </div>
         }
+      } @else if (planService.error()) {
+        <p class="alert-error" role="alert">{{ planService.error() }}</p>
+      } @else {
+        <div class="card"><app-skeleton height="80px" /></div>
       }
     </div>
   `,
@@ -115,24 +169,48 @@ Chart.register(...registerables);
 export class DashboardPageComponent implements OnInit, OnDestroy {
   analytics = inject(AnalyticsService);
   planService = inject(PlanService);
+  urlService = inject(UrlService);
+  private theme = inject(ThemeService);
+
   usage = describeUsage;
   labels = PLAN_LABELS;
+  host = environment.baseRedirectUrl.replace(/^https?:\/\//, '');
+
+  readonly ranges = [7, 30] as const;
+  range = signal<7 | 30>(7);
+  series = signal<{ day: string; count: number }[]>([]);
+
+  topMax = computed(() => Math.max(1, ...(this.analytics.dashboard()?.topUrls.map((u) => u.clickCount) ?? [0])));
+  chartSummary = computed(() => {
+    const total = this.series().reduce((sum, r) => sum + r.count, 0);
+    return `Clicks per day over the last ${this.range()} days: ${total} in total.`;
+  });
+
   chartCanvas = viewChild<ElementRef<HTMLCanvasElement>>('chartCanvas');
   private chart: Chart | null = null;
 
   constructor() {
-    // Draw once the canvas exists, which is after the dashboard has loaded.
+    // Load once the canvas exists (after the dashboard data arrives).
     effect(() => {
-      if (this.chartCanvas()) {
-        this.loadChart();
-      }
+      if (this.chartCanvas()) this.loadSeries();
+    });
+    // Redraw in the new colours when the theme changes.
+    effect(() => {
+      this.theme.theme();
+      this.draw();
     });
   }
 
   ngOnInit(): void {
-    // Analytics endpoints refuse plans without analytics, so check first.
+    // Analytics endpoints refuse plans without analytics, so check the plan first.
     this.planService.load().subscribe({
-      next: (plan) => { if (plan.analytics) this.analytics.fetchDashboard(); },
+      next: (plan) => {
+        if (plan.analytics) {
+          this.analytics.fetchDashboard();
+        } else {
+          this.urlService.getMyUrls(null, 5, 'desc');
+        }
+      },
       error: () => {},
     });
   }
@@ -141,63 +219,38 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
     this.chart?.destroy();
   }
 
-  /** Clicks per day for the last 7 days, across all of the user's links. */
-  private loadChart(): void {
-    const days = this.last7Days();
-    this.analytics.getTotalClicks(days[0], days[6]).subscribe({
+  percent(value: number, max: number): number {
+    return max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  }
+
+  setRange(days: 7 | 30): void {
+    this.range.set(days);
+    this.loadSeries();
+  }
+
+  private loadSeries(): void {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - (this.range() - 1));
+    const days = daysBetween(start, end);
+    this.analytics.getTotalClicks(days[0], days[days.length - 1]).subscribe({
       next: (res) => {
-        const byDate = new Map(res.data.map((d) => [d.clickDate, d.count]));
-        this.buildChart(days, days.map((day) => byDate.get(day) ?? 0));
+        const byDay = new Map(res.data.map((d) => [d.clickDate, d.count]));
+        this.series.set(days.map((day) => ({ day, count: byDay.get(day) ?? 0 })));
+        this.draw();
       },
-      error: () => this.buildChart(days, days.map(() => 0)),
+      error: () => {
+        this.series.set(days.map((day) => ({ day, count: 0 })));
+        this.draw();
+      },
     });
   }
 
-  private buildChart(days: string[], counts: number[]): void {
+  private draw(): void {
     const canvas = this.chartCanvas()?.nativeElement;
-    if (!canvas) return;
-    if (this.chart) this.chart.destroy();
-
-    const isDark = document.documentElement.classList.contains('dark');
-    const config: ChartConfiguration = {
-      type: 'line',
-      data: {
-        labels: days.map((day) => new Date(day + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })),
-        datasets: [{
-          label: 'Clicks',
-          data: counts,
-          borderColor: '#EE6123',
-          backgroundColor: 'rgba(238,97,35,0.08)',
-          fill: true,
-          tension: 0.4,
-          pointRadius: 4,
-          pointBackgroundColor: '#EE6123',
-          borderWidth: 2,
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-        },
-        scales: {
-          x: { grid: { display: false }, ticks: { color: isDark ? '#94A3B8' : '#6B7280' } },
-          // Click counts: whole numbers from zero, with room above a flat line of zeros.
-          y: { beginAtZero: true, suggestedMax: 5, grid: { color: isDark ? '#334155' : '#E5E7EB' }, ticks: { precision: 0, color: isDark ? '#94A3B8' : '#6B7280' } },
-        },
-      },
-    };
-    this.chart = new Chart(canvas, config);
-  }
-
-  /** The last 7 days as yyyy-MM-dd in local time, oldest first. */
-  private last7Days(): string[] {
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(); d.setDate(d.getDate() - (6 - i));
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    });
+    const rows = this.series();
+    if (!canvas || rows.length === 0) return;
+    this.chart?.destroy();
+    this.chart = new Chart(canvas, lineChart(rows.map((r) => dayLabel(r.day)), rows.map((r) => r.count), this.theme.isDark()));
   }
 }
-

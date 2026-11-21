@@ -1,19 +1,7 @@
-<div class="card rounded-2xl border-l-4"
-     [class.border-l-blue-500]="accent() === 'blue'"
-     [class.border-l-orange-500]="accent() === 'orange'"
-     [class.border-l-green-500]="accent() === 'green'"
-     [class.border-l-purple-500]="accent() === 'purple'">
-  <div class="flex items-center gap-3 mb-2">
-    <span class="text-2xl">{{ icon() }}</span>
-    <p class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{{ label() }}</p>
-  </div>
-  <p class="text-3xl font-bold text-navy-900 dark:text-white">{{ value() }}</p>
+<div class="card h-full">
+  <p class="text-sm font-medium text-slate-500 dark:text-slate-400">{{ label() }}</p>
+  <p class="mt-1 truncate text-3xl font-bold tracking-tight text-slate-900 dark:text-white" [title]="value()">{{ value() }}</p>
   @if (comparison()) {
-    <p class="mt-1 text-xs font-medium"
-       [class.text-green-600]="comparisonTrend() === 'up'"
-       [class.text-red-500]="comparisonTrend() === 'down'">
-      @if (comparisonTrend() === 'up') { ↑ } @else { ↓ }
-      {{ comparison() }}
-    </p>
+    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{{ comparison() }}</p>
   }
 </div>
