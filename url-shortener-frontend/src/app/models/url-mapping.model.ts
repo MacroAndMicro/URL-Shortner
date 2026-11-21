@@ -5,6 +5,8 @@ export interface UrlMapping {
   clickCount: number;
   createdDate: string;
   username: string;
+  /** When the link stops working; null if it never expires. */
+  expiresAt: string | null;
 }
 
 export interface CreateUrlRequest {

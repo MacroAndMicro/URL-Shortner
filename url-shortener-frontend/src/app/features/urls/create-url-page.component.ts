@@ -1,5 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { DatePipe } from '@angular/common';
 import { UrlService } from '../../core/services/url.service';
 import { CopyButtonComponent } from '../../shared/components/copy-button.component';
 import { UrlMapping } from '../../models/url-mapping.model';
@@ -8,7 +9,7 @@ import { environment } from '../../environments/environment';
 @Component({
   selector: 'app-create-url-page',
   standalone: true,
-  imports: [ReactiveFormsModule, CopyButtonComponent],
+  imports: [ReactiveFormsModule, DatePipe, CopyButtonComponent],
   template: `
     <div class="section py-8">
       <h1 class="text-h2 mb-2 text-navy-900 dark:text-white">Create Short URL</h1>
@@ -40,6 +41,9 @@ import { environment } from '../../environments/environment';
               <code class="flex-1 bg-white dark:bg-slate-800 px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-700 text-navy-900 dark:text-white font-mono text-sm break-all">{{ shortLink() }}</code>
               <app-copy-button [text]="shortLink()" label="Copy" />
             </div>
+            @if (createdUrl()?.expiresAt; as expiresAt) {
+              <p class="text-xs text-green-700 dark:text-green-400 mt-2">Works until {{ expiresAt | date: 'medium' }}.</p>
+            }
           </div>
         }
       </div>

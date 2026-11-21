@@ -1,7 +1,8 @@
 import { Component, inject, OnInit, computed } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { SlicePipe } from '@angular/common';
+import { DatePipe, SlicePipe } from '@angular/common';
+import { PlanService } from '../../core/services/plan.service';
 import { UrlService } from '../../core/services/url.service';
 import { SkeletonComponent } from '../../shared/components/skeleton.component';
 import { CopyButtonComponent } from '../../shared/components/copy-button.component';
@@ -11,13 +12,18 @@ import { environment } from '../../environments/environment';
 @Component({
   selector: 'app-my-urls-page',
   standalone: true,
-  imports: [RouterLink, FormsModule, SlicePipe, SkeletonComponent, CopyButtonComponent],
+  imports: [RouterLink, FormsModule, DatePipe, SlicePipe, SkeletonComponent, CopyButtonComponent],
   template: `
     <div class="section py-8">
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h1 class="text-h2 text-navy-900 dark:text-white">My URLs</h1>
           <p class="text-slate-500 dark:text-slate-400 mt-1">Manage and track all your shortened links.</p>
+          @if (planService.plan(); as p) {
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
+              {{ p.activeUrls }} of {{ p.maxActiveUrls }} active links@if (p.linkLifetimeDays) {; links last {{ p.linkLifetimeDays }} days and then disappear}.
+            </p>
+          }
         </div>
         <a routerLink="/urls/create" class="btn-accent">+ Create New</a>
       </div>
@@ -46,7 +52,7 @@ import { environment } from '../../environments/environment';
           <table class="w-full text-sm">
             <thead>
               <tr class="border-b border-gray-100 dark:border-slate-700 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                <th class="pb-3">Short URL</th><th class="pb-3 hidden sm:table-cell">Original</th><th class="pb-3 text-right">Clicks</th><th class="pb-3 hidden sm:table-cell">Created</th><th class="pb-3 text-right">Actions</th>
+                <th class="pb-3">Short URL</th><th class="pb-3 hidden sm:table-cell">Original</th>@if (showClicks()) {<th class="pb-3 text-right">Clicks</th>}<th class="pb-3 hidden sm:table-cell">Created</th>@if (!showClicks()) {<th class="pb-3">Expires</th>}<th class="pb-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -59,11 +65,18 @@ import { environment } from '../../environments/environment';
                     </div>
                   </td>
                   <td class="py-3 text-slate-500 dark:text-slate-400 max-w-[200px] truncate hidden sm:table-cell text-xs">{{ url.originalUrl }}</td>
-                  <td class="py-3 text-right font-bold text-navy-900 dark:text-white">{{ url.clickCount }}</td>
+                  @if (showClicks()) {
+                    <td class="py-3 text-right font-bold text-navy-900 dark:text-white">{{ url.clickCount }}</td>
+                  }
                   <td class="py-3 text-xs text-slate-400 hidden sm:table-cell">{{ url.createdDate | slice:0:10 }}</td>
+                  @if (!showClicks()) {
+                    <td class="py-3 text-xs text-slate-500 dark:text-slate-400">{{ url.expiresAt ? (url.expiresAt | date: 'MMM d, HH:mm') : 'Never' }}</td>
+                  }
                   <td class="py-3 text-right">
                     <div class="flex gap-2 justify-end">
-                      <a [routerLink]="['/analytics', url.shortUrl]" class="text-xs font-medium text-navy-500 dark:text-navy-200 hover:text-orange-500 transition-colors">Stats</a>
+                      @if (showClicks()) {
+                        <a [routerLink]="['/analytics', url.shortUrl]" class="text-xs font-medium text-navy-500 dark:text-navy-200 hover:text-orange-500 transition-colors">Stats</a>
+                      }
                       <button (click)="deleteUrl(url)" class="text-xs font-medium text-red-500 hover:text-red-700 transition-colors">Delete</button>
                     </div>
                   </td>
@@ -88,6 +101,9 @@ import { environment } from '../../environments/environment';
 })
 export class MyUrlsPageComponent implements OnInit {
   urlService = inject(UrlService);
+  planService = inject(PlanService);
+  /** Click counts only exist on plans with analytics. */
+  showClicks = computed(() => this.planService.plan()?.analytics ?? false);
   searchTerm = '';
   direction = 'desc';
   pageIndex = 0;
@@ -102,7 +118,7 @@ export class MyUrlsPageComponent implements OnInit {
     return urls.filter((u: UrlMapping) => u.originalUrl.toLowerCase().includes(term) || u.shortUrl.toLowerCase().includes(term));
   });
 
-  ngOnInit(): void { this.loadUrls(); }
+  ngOnInit(): void { this.planService.fetchPlan(); this.loadUrls(); }
 
   loadUrls(): void { this.urlService.getMyUrls(this.cursors[this.pageIndex], 20, this.direction); }
   updateFilter(): void {}

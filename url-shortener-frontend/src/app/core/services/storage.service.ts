@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 
 const TOKEN_KEY = 'access_token';
 const REFRESH_TOKEN_KEY = 'refresh_token';
+const GUEST_ID_KEY = 'guest_id';
 
 @Injectable({ providedIn: 'root' })
 export class StorageService {
@@ -28,5 +29,18 @@ export class StorageService {
 
   isAuthenticated(): boolean {
     return !!this.getToken();
+  }
+
+  /**
+   * A random ID for this browser, which the backend uses to allow guests one
+   * active link. Kept across logins and logouts (clear() leaves it alone).
+   */
+  getGuestId(): string {
+    let id = localStorage.getItem(GUEST_ID_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(GUEST_ID_KEY, id);
+    }
+    return id;
   }
 }

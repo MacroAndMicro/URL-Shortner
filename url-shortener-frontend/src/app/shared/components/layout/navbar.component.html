@@ -14,6 +14,7 @@
           <a routerLink="/dashboard" routerLinkActive="!text-white !bg-white/10" class="btn-ghost">Dashboard</a>
           <a routerLink="/urls/create" routerLinkActive="!text-white !bg-white/10" class="btn-ghost">Create</a>
           <a routerLink="/urls" routerLinkActive="!text-white !bg-white/10" class="btn-ghost">My URLs</a>
+          <a routerLink="/plan" routerLinkActive="!text-white !bg-white/10" class="btn-ghost">Plan</a>
           <div class="w-px h-5 bg-white/20 mx-2"></div>
           <button (click)="auth.logout().subscribe()" class="btn-ghost text-white/50">Logout</button>
         } @else {
@@ -45,6 +46,7 @@
           <a routerLink="/dashboard" class="block btn-ghost w-full text-left" (click)="mobileOpen.set(false)">Dashboard</a>
           <a routerLink="/urls/create" class="block btn-ghost w-full text-left" (click)="mobileOpen.set(false)">Create</a>
           <a routerLink="/urls" class="block btn-ghost w-full text-left" (click)="mobileOpen.set(false)">My URLs</a>
+          <a routerLink="/plan" class="block btn-ghost w-full text-left" (click)="mobileOpen.set(false)">Plan</a>
           <button (click)="auth.logout().subscribe(); mobileOpen.set(false)" class="block btn-ghost w-full text-left text-white/50">Logout</button>
         } @else {
           <a routerLink="/login" class="block btn-ghost w-full text-left" (click)="mobileOpen.set(false)">Login</a>

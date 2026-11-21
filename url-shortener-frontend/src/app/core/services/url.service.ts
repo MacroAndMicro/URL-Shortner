@@ -4,10 +4,12 @@ import { Observable, tap } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { UrlMapping, CreateUrlRequest, UpdateUrlRequest } from '../../models/url-mapping.model';
 import { ApiResponse, CursorPage } from '../../models/api-response.model';
+import { StorageService } from './storage.service';
 
 @Injectable({ providedIn: 'root' })
 export class UrlService {
   private readonly http = inject(HttpClient);
+  private readonly storage = inject(StorageService);
   private readonly baseUrl = `${environment.apiUrl}/api/v1/urls`;
 
   readonly urls = signal<UrlMapping[]>([]);
@@ -23,6 +25,12 @@ export class UrlService {
         error: () => this.loading.set(false),
       })
     );
+  }
+
+  /** Shortens a URL without an account; the backend allows one active link per browser. */
+  createGuestUrl(request: CreateUrlRequest): Observable<ApiResponse<UrlMapping>> {
+    const headers = { 'X-Guest-Id': this.storage.getGuestId() };
+    return this.http.post<ApiResponse<UrlMapping>>(`${environment.apiUrl}/api/v1/guest/shorten`, request, { headers });
   }
 
   getMyUrls(cursor: string | null = null, size: number = 20, direction: string = 'desc'): void {

@@ -1,6 +1,8 @@
-import { Component, inject, OnInit, AfterViewInit, ElementRef, viewChild } from '@angular/core';
+import { Component, inject, OnInit, OnDestroy, ElementRef, viewChild, effect } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { DecimalPipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
+import { PlanService } from '../../core/services/plan.service';
+import { PLAN_LABELS } from '../../models/plan.model';
 import { Chart, ChartConfiguration, registerables } from 'chart.js';
 import { AnalyticsService } from '../../core/services/analytics.service';
 import { StatCardComponent } from '../../shared/components/stat-card.component';
@@ -11,7 +13,7 @@ Chart.register(...registerables);
 @Component({
   selector: 'app-dashboard-page',
   standalone: true,
-  imports: [RouterLink, DecimalPipe, StatCardComponent, SkeletonComponent],
+  imports: [RouterLink, DecimalPipe, DatePipe, StatCardComponent, SkeletonComponent],
   template: `
     <div class="section py-8">
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
@@ -22,7 +24,33 @@ Chart.register(...registerables);
         <a routerLink="/urls/create" class="btn-accent">+ Create New Link</a>
       </div>
 
-      @if (analytics.loading()) {
+      @if (planService.plan(); as p) {
+        <div class="card rounded-2xl mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <p class="text-sm text-slate-500 dark:text-slate-400">{{ labels[p.effectivePlan] }} plan</p>
+            <p class="text-lg font-semibold text-navy-900 dark:text-white">{{ p.activeUrls }} of {{ p.maxActiveUrls }} active links</p>
+            @if (p.linkLifetimeDays) {
+              <p class="text-sm text-slate-500 dark:text-slate-400">Links last {{ p.linkLifetimeDays }} days.</p>
+            }
+            @if (p.inGracePeriod) {
+              <p class="text-sm text-orange-600 dark:text-orange-400">Payment overdue: pay by {{ p.graceEndsAt | date: 'mediumDate' }} to keep your plan.</p>
+            }
+          </div>
+          <a routerLink="/plan" class="btn-outline text-sm">View plan</a>
+        </div>
+
+        @if (!p.analytics) {
+          <div class="card-elevated text-center py-12">
+            <h3 class="text-h3 text-navy-900 dark:text-white mb-2">Click analytics are on paid plans</h3>
+            <p class="text-slate-500 dark:text-slate-400 mb-6">The Monthly and Yearly plans count every click and show where your visitors come from.</p>
+            <a routerLink="/urls" class="btn-accent inline-block">Go to my links</a>
+          </div>
+        }
+      }
+
+      @if (!planService.plan()?.analytics) {
+        <!-- Analytics not available on this plan (or the plan is still loading). -->
+      } @else if (analytics.loading()) {
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           @for (i of [1,2,3,4]; track i) {
             <div class="card rounded-2xl"><app-skeleton height="80px" /></div>
@@ -83,20 +111,47 @@ Chart.register(...registerables);
     </div>
   `,
 })
-export class DashboardPageComponent implements OnInit, AfterViewInit {
+export class DashboardPageComponent implements OnInit, OnDestroy {
   analytics = inject(AnalyticsService);
+  planService = inject(PlanService);
+  labels = PLAN_LABELS;
   chartCanvas = viewChild<ElementRef<HTMLCanvasElement>>('chartCanvas');
   private chart: Chart | null = null;
 
+  constructor() {
+    // Draw once the canvas exists, which is after the dashboard has loaded.
+    effect(() => {
+      if (this.chartCanvas()) {
+        this.loadChart();
+      }
+    });
+  }
+
   ngOnInit(): void {
-    this.analytics.fetchDashboard();
+    // Analytics endpoints refuse plans without analytics, so check first.
+    this.planService.load().subscribe({
+      next: (plan) => { if (plan.analytics) this.analytics.fetchDashboard(); },
+      error: () => {},
+    });
   }
 
-  ngAfterViewInit(): void {
-    setTimeout(() => this.buildChart(), 800);
+  ngOnDestroy(): void {
+    this.chart?.destroy();
   }
 
-  private buildChart(): void {
+  /** Clicks per day for the last 7 days, across all of the user's links. */
+  private loadChart(): void {
+    const days = this.last7Days();
+    this.analytics.getTotalClicks(days[0], days[6]).subscribe({
+      next: (res) => {
+        const byDate = new Map(res.data.map((d) => [d.clickDate, d.count]));
+        this.buildChart(days, days.map((day) => byDate.get(day) ?? 0));
+      },
+      error: () => this.buildChart(days, days.map(() => 0)),
+    });
+  }
+
+  private buildChart(days: string[], counts: number[]): void {
     const canvas = this.chartCanvas()?.nativeElement;
     if (!canvas) return;
     if (this.chart) this.chart.destroy();
@@ -105,10 +160,10 @@ export class DashboardPageComponent implements OnInit, AfterViewInit {
     const config: ChartConfiguration = {
       type: 'line',
       data: {
-        labels: this.last7Days(),
+        labels: days.map((day) => new Date(day + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })),
         datasets: [{
           label: 'Clicks',
-          data: [12, 19, 8, 27, 15, 33, 21],
+          data: counts,
           borderColor: '#EE6123',
           backgroundColor: 'rgba(238,97,35,0.08)',
           fill: true,
@@ -133,10 +188,12 @@ export class DashboardPageComponent implements OnInit, AfterViewInit {
     this.chart = new Chart(canvas, config);
   }
 
+  /** The last 7 days as yyyy-MM-dd in local time, oldest first. */
   private last7Days(): string[] {
+    const pad = (n: number) => String(n).padStart(2, '0');
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(); d.setDate(d.getDate() - (6 - i));
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     });
   }
 }

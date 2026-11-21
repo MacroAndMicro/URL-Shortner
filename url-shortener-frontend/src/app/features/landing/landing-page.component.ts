@@ -1,5 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { DatePipe } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { AuthService } from '../../core/services/auth.service';
 import { UrlService } from '../../core/services/url.service';
@@ -10,7 +11,7 @@ import { environment } from '../../environments/environment';
 @Component({
   selector: 'app-landing-page',
   standalone: true,
-  imports: [RouterLink, ReactiveFormsModule, CopyButtonComponent],
+  imports: [RouterLink, ReactiveFormsModule, DatePipe, CopyButtonComponent],
   template: `
     <!-- Hero -->
     <section class="relative overflow-hidden bg-gradient-to-br from-navy-900 via-navy-900 to-navy-500">
@@ -26,26 +27,40 @@ import { environment } from '../../environments/environment';
 
         <!-- Inline shortener -->
         <div class="max-w-xl mx-auto">
-          @if (auth.isAuthenticated()) {
-            <form [formGroup]="form" (ngSubmit)="shorten()" class="flex gap-2">
-              <input type="url" formControlName="originalUrl" placeholder="Paste your long URL here..." class="input-lg flex-1" />
-              <button type="submit" [disabled]="form.invalid || loading()" class="btn-accent px-6 py-4 whitespace-nowrap text-base">
-                @if (loading()) { Shortening... } @else { Shorten }
-              </button>
-            </form>
-            @if (result()) {
-              <div class="mt-4 p-4 bg-white/10 backdrop-blur rounded-xl border border-white/20 text-left animate-slide-in-right">
-                <p class="text-xs text-white/50 mb-1">Your short link is ready:</p>
-                <div class="flex items-center gap-2">
-                  <code class="flex-1 text-white font-mono text-sm">{{ shortLink() }}</code>
-                  <app-copy-button [text]="shortLink()" label="Copy" />
+          <form [formGroup]="form" (ngSubmit)="shorten()" class="flex gap-2">
+            <label for="landing-url" class="sr-only">Long URL</label>
+            <input id="landing-url" type="url" formControlName="originalUrl" placeholder="Paste your long URL here..." class="input-lg flex-1" />
+            <button type="submit" [disabled]="form.invalid || loading()" class="btn-accent px-6 py-4 whitespace-nowrap text-base">
+              @if (loading()) { Shortening... } @else { Shorten }
+            </button>
+          </form>
+          @if (!auth.isAuthenticated()) {
+            <p class="mt-3 text-sm text-white/60">
+              No account needed for one link. Links last 5 days.
+              <a routerLink="/register" class="text-orange-400 font-medium">Sign up free</a> for more.
+            </p>
+          }
+          @if (error()) {
+            <div class="mt-4 p-4 bg-red-500/15 rounded-xl border border-red-400/40 text-left text-sm text-white">
+              {{ error() }}
+              @if (!auth.isAuthenticated()) {
+                <div class="mt-3 flex gap-2">
+                  <a routerLink="/register" class="btn-accent text-sm">Sign up free</a>
+                  <a routerLink="/login" class="btn-ghost text-sm">Sign in</a>
                 </div>
+              }
+            </div>
+          }
+          @if (result(); as r) {
+            <div class="mt-4 p-4 bg-white/10 backdrop-blur rounded-xl border border-white/20 text-left animate-slide-in-right">
+              <p class="text-xs text-white/50 mb-1">Your short link is ready:</p>
+              <div class="flex items-center gap-2">
+                <code class="flex-1 text-white font-mono text-sm">{{ shortLink() }}</code>
+                <app-copy-button [text]="shortLink()" label="Copy" />
               </div>
-            }
-          } @else {
-            <div class="flex gap-2 justify-center flex-wrap">
-              <a routerLink="/register" class="btn-accent px-8 py-4 text-base">Get Started Free</a>
-              <a routerLink="/login" class="btn-outline border-white/30 !text-white hover:!bg-white hover:!text-navy-900 px-8 py-4 text-base">Sign In</a>
+              @if (r.expiresAt) {
+                <p class="text-xs text-white/50 mt-2">Works until {{ r.expiresAt | date: 'medium' }}.</p>
+              }
             </div>
           }
         </div>
@@ -105,6 +120,7 @@ export class LandingPageComponent {
 
   loading = signal(false);
   result = signal<UrlMapping | null>(null);
+  error = signal<string | null>(null);
 
   features = [
     { icon: '🔗', title: 'Instant Shortening', description: 'Paste a long URL and get a short, shareable link in one click.', color: 'blue' },
@@ -121,9 +137,17 @@ export class LandingPageComponent {
   shorten(): void {
     if (this.form.invalid) return;
     this.loading.set(true);
-    this.urlService.createUrl(this.form.value).subscribe({
+    this.error.set(null);
+    const request = this.auth.isAuthenticated()
+      ? this.urlService.createUrl(this.form.value)
+      : this.urlService.createGuestUrl(this.form.value);
+    request.subscribe({
       next: (res) => { this.result.set(res.data); this.loading.set(false); },
-      error: () => { this.loading.set(false); },
+      error: (err) => {
+        this.result.set(null);
+        this.error.set(err.error?.message ?? 'Could not shorten the URL. Please try again.');
+        this.loading.set(false);
+      },
     });
   }
 }
