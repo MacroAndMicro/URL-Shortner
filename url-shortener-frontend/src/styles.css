@@ -1,0 +1,136 @@
+@import "tailwindcss";
+
+/* Dark mode follows the .dark class set by ThemeService, not only the OS setting. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ═══════════════════════════════════════
+   ShortLink design tokens
+   Navy for structure, orange for actions.
+   ═══════════════════════════════════════ */
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --color-navy-50: #f0f4fa;
+  --color-navy-100: #d9e2f0;
+  --color-navy-200: #b3c5e0;
+  --color-navy-300: #8aa6cf;
+  --color-navy-500: #2d4a7a;
+  --color-navy-700: #18325c;
+  --color-navy-900: #0b1e3a;
+
+  --color-orange-50: #fff4ee;
+  --color-orange-100: #ffe3d3;
+  --color-orange-400: #f47c45;
+  --color-orange-500: #ee6123;
+  --color-orange-600: #d4541e;
+  --color-orange-700: #b04418;
+
+  --color-slate-850: #172033;
+
+  --animate-fade-up: fade-up 0.35s ease-out both;
+  --animate-slide-in-right: fade-up 0.35s ease-out both;
+
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    @apply bg-slate-50 text-slate-900 font-sans antialiased dark:bg-slate-950 dark:text-slate-100;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-orange-500;
+  }
+  button:not(:disabled), [role="button"] { cursor: pointer; }
+  svg { flex-shrink: 0; }
+}
+
+/* Building blocks other classes @apply; Tailwind v4 only allows @apply of utilities. */
+@utility btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold
+           transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+}
+@utility input-field {
+    @apply block w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900
+           placeholder:text-slate-400 transition-colors
+           focus:border-orange-500 focus:outline-none focus:ring-3 focus:ring-orange-500/20
+           disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500
+           dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500
+           dark:disabled:bg-slate-800;
+}
+@utility card {
+    @apply rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900;
+}
+
+@layer components {
+  /* ═══ Layout ═══ */
+  .section {
+    @apply mx-auto w-full max-w-6xl px-4 sm:px-6;
+  }
+  .section-py {
+    @apply mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-20;
+  }
+
+  /* ═══ Type ═══ */
+  .text-display {
+    @apply text-4xl font-extrabold leading-tight tracking-tight sm:text-5xl;
+  }
+  .text-h1 { @apply text-3xl font-bold tracking-tight; }
+  .text-h2 { @apply text-2xl font-bold tracking-tight sm:text-3xl; }
+  .text-h3 { @apply text-lg font-semibold; }
+  .text-body-lg { @apply text-lg leading-relaxed text-slate-600 dark:text-slate-300; }
+
+  /* ═══ Buttons ═══ */
+  .btn-accent {
+    @apply btn bg-orange-500 text-white shadow-sm hover:bg-orange-600 active:bg-orange-700;
+  }
+  .btn-primary {
+    @apply btn bg-navy-900 text-white hover:bg-navy-700 dark:bg-navy-500 dark:hover:bg-navy-700;
+  }
+  .btn-outline {
+    @apply btn border border-slate-300 bg-white text-slate-800 hover:bg-slate-50
+           dark:border-slate-600 dark:bg-transparent dark:text-slate-100 dark:hover:bg-slate-800;
+  }
+  .btn-ghost {
+    @apply btn text-slate-600 hover:bg-slate-100 hover:text-slate-900
+           dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white;
+  }
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700;
+  }
+
+  /* ═══ Forms ═══ */
+  .input-lg {
+    @apply input-field px-4 py-3.5 text-base;
+  }
+  .field-label {
+    @apply mb-1.5 flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100;
+  }
+
+  /* ═══ Surfaces ═══ */
+  .card-elevated {
+    @apply rounded-2xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-900/5 sm:p-8
+           dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30;
+  }
+  .card-hover {
+    @apply card transition-shadow hover:shadow-md;
+  }
+
+  /* Compatibility with older markup. */
+  .shadow-card { @apply shadow-sm; }
+  .shadow-card-hover { @apply shadow-md; }
+  .shadow-elevated { @apply shadow-lg; }
+
+  /* ═══ Messages ═══ */
+  .alert-error {
+    @apply rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700
+           dark:border-red-900 dark:bg-red-950/40 dark:text-red-300;
+  }
+  .alert-warning {
+    @apply rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800
+           dark:border-orange-900 dark:bg-orange-950/40 dark:text-orange-200;
+  }
+}

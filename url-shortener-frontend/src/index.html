@@ -10,10 +10,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script>
-    (function(){var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.classList.add('dark')}})()
+    // Applies the theme before Angular starts, to avoid a flash of the wrong one.
+    (function(){var t=null;try{t=localStorage.getItem('theme')}catch(e){}if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.classList.add('dark')}})()
   </script>
 </head>
-<body class="bg-[#F5F7FA] dark:bg-[#0F172A] text-[#1A1A2E] dark:text-[#F1F5F9] antialiased font-sans">
+<body>
   <app-root></app-root>
 </body>
 </html>
