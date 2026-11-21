@@ -18,9 +18,11 @@ import com.Url_Shortener.repository.UrlMappingDynamoRepository;
 import com.Url_Shortener.security.IpHasher;
 import com.Url_Shortener.storage.AnalyticsStorage;
 
+import com.Url_Shortener.shortcode.Base62;
+import com.Url_Shortener.shortcode.SnowflakeIdGenerator;
+
 import org.springframework.stereotype.Service;
 
-import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -44,11 +46,11 @@ import java.util.stream.Collectors;
 @Service
 public class UrlMappingService {
 
-    private static final String SHORT_URL_CHARACTERS =
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    private static final int SHORT_URL_LENGTH = 8;
-    private static final int MAX_SHORT_URL_ATTEMPTS = 5;
-    private static final SecureRandom RANDOM = new SecureRandom();
+    /**
+     * Snowflake IDs never repeat, so a taken code only happens if a custom
+     * code already claimed it. A fresh ID then gives a different code.
+     */
+    private static final int MAX_SHORT_URL_ATTEMPTS = 3;
 
     private final UrlMappingDynamoRepository urlMappingRepository;
     private final AnalyticsStorage analyticsStorage;
@@ -56,19 +58,22 @@ public class UrlMappingService {
     private final CacheService cacheService;
     private final UrlShortenerMetrics metrics;
     private final IpHasher ipHasher;
+    private final SnowflakeIdGenerator idGenerator;
 
     public UrlMappingService(UrlMappingDynamoRepository urlMappingRepository,
                              AnalyticsStorage analyticsStorage,
                              AnalyticsPublisher analyticsPublisher,
                              CacheService cacheService,
                              UrlShortenerMetrics metrics,
-                             IpHasher ipHasher) {
+                             IpHasher ipHasher,
+                             SnowflakeIdGenerator idGenerator) {
         this.urlMappingRepository = urlMappingRepository;
         this.analyticsStorage = analyticsStorage;
         this.analyticsPublisher = analyticsPublisher;
         this.cacheService = cacheService;
         this.metrics = metrics;
         this.ipHasher = ipHasher;
+        this.idGenerator = idGenerator;
     }
 
     /**
@@ -87,7 +92,6 @@ public class UrlMappingService {
         }
 
         UrlMappingItem item = new UrlMappingItem();
-        item.setId(generateId());
         item.setOriginalUrl(originalUrl);
         item.setOwnerId(user.getId());
         item.setOwnerUsername(user.getUsername());
@@ -109,21 +113,16 @@ public class UrlMappingService {
 
     private void saveWithUniqueShortUrl(UrlMappingItem item) {
         for (int attempt = 0; attempt < MAX_SHORT_URL_ATTEMPTS; attempt++) {
-            item.setShortUrl(generateShortUrl());
+            // One Snowflake ID serves as both the numeric id used by the REST
+            // {id} endpoints and, base62-encoded, the short code.
+            long id = idGenerator.nextId();
+            item.setId(id);
+            item.setShortUrl(Base62.encode(id));
             if (urlMappingRepository.saveIfNotExists(item)) {
                 return;
             }
         }
         throw new IllegalStateException("Could not allocate a unique short URL");
-    }
-
-    /**
-     * Generates a random positive ID for the REST API {id} endpoints.
-     * Collisions are extremely unlikely but are not prevented: the id-index
-     * GSI does not enforce uniqueness.
-     */
-    private Long generateId() {
-        return RANDOM.nextLong() & Long.MAX_VALUE;
     }
 
     private UrlMappingDto convertToDto(UrlMappingItem item) {
@@ -141,14 +140,6 @@ public class UrlMappingService {
 
     private int clickCountOf(UrlMappingItem item) {
         return item.getClickCount() != null ? item.getClickCount() : 0;
-    }
-
-    private String generateShortUrl() {
-        StringBuilder sb = new StringBuilder(SHORT_URL_LENGTH);
-        for (int i = 0; i < SHORT_URL_LENGTH; i++) {
-            sb.append(SHORT_URL_CHARACTERS.charAt(RANDOM.nextInt(SHORT_URL_CHARACTERS.length())));
-        }
-        return sb.toString();
     }
 
     /**

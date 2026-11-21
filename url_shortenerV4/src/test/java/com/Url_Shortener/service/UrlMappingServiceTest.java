@@ -12,6 +12,8 @@ import com.Url_Shortener.model.UrlMappingItem;
 import com.Url_Shortener.publisher.AnalyticsPublisher;
 import com.Url_Shortener.repository.UrlMappingDynamoRepository;
 import com.Url_Shortener.security.IpHasher;
+import com.Url_Shortener.shortcode.Base62;
+import com.Url_Shortener.shortcode.SnowflakeIdGenerator;
 import com.Url_Shortener.storage.AnalyticsStorage;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,7 +49,8 @@ class UrlMappingServiceTest {
         publisher = mock(AnalyticsPublisher.class);
         cache = mock(CacheService.class);
         service = new UrlMappingService(repository, analyticsStorage, publisher, cache,
-                new UrlShortenerMetrics(new SimpleMeterRegistry()), new IpHasher("salt"));
+                new UrlShortenerMetrics(new SimpleMeterRegistry()), new IpHasher("salt"),
+                new SnowflakeIdGenerator(0));
         user = new User();
         user.setId(1L);
         user.setUsername("tester");
@@ -113,14 +116,27 @@ class UrlMappingServiceTest {
     }
 
     @Test
+    void createUsesTheBase62SnowflakeIdAsTheShortCode() {
+        when(repository.findByOwnerId(1L)).thenReturn(List.of());
+        when(repository.saveIfNotExists(any())).thenReturn(true);
+
+        UrlMappingDto dto = service.createShortUrl(TARGET, user);
+
+        assertThat(dto.getShortUrl()).matches("[0-9A-Za-z]{10,11}");
+        assertThat(Base62.decode(dto.getShortUrl())).isEqualTo(dto.getId());
+    }
+
+    @Test
     void createRetriesWithANewCodeOnCollision() {
         when(repository.findByOwnerId(1L)).thenReturn(List.of());
         when(repository.saveIfNotExists(any())).thenReturn(false, true);
 
+        ArgumentCaptor<UrlMappingItem> saved = ArgumentCaptor.forClass(UrlMappingItem.class);
         UrlMappingDto dto = service.createShortUrl(TARGET, user);
 
-        verify(repository, times(2)).saveIfNotExists(any());
-        assertThat(dto.getShortUrl()).matches("[A-Za-z0-9]{8}");
+        verify(repository, times(2)).saveIfNotExists(saved.capture());
+        assertThat(dto.getShortUrl()).matches("[0-9A-Za-z]{10,11}");
+        assertThat(Base62.decode(dto.getShortUrl())).isEqualTo(dto.getId());
     }
 
     @Test
