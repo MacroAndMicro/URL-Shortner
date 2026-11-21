@@ -46,6 +46,14 @@
       "value": ""
     },
     {
+      "key": "customCode",
+      "value": ""
+    },
+    {
+      "key": "customId",
+      "value": ""
+    },
+    {
       "key": "rangeStart",
       "value": ""
     },
@@ -368,7 +376,10 @@
                   "pm.test('Free plan rules', () => {",
                   "  const p = pm.response.json().data;",
                   "  pm.expect(p.effectivePlan).to.eql('FREE');",
-                  "  pm.expect(p.maxActiveUrls).to.eql(50);",
+                  "  pm.expect(p.linkLimit).to.eql(50);",
+                  "  pm.expect(p.limitPeriod).to.eql('ACTIVE');",
+                  "  pm.expect(p.editWindowHours).to.eql(3);",
+                  "  pm.expect(p.customCodes).to.eql(false);",
                   "  pm.expect(p.linkLifetimeDays).to.eql(5);",
                   "  pm.expect(p.analytics).to.eql(false);",
                   "  pm.expect(p.redirectStatus).to.eql(301);",
@@ -625,7 +636,7 @@
           }
         },
         {
-          "name": "Update URL",
+          "name": "Update URL (Free: within 3 hours of creation)",
           "event": [
             {
               "listen": "test",
@@ -787,7 +798,9 @@
                   "pm.test('Yearly plan rules', () => {",
                   "  const p = pm.response.json().data;",
                   "  pm.expect(p.effectivePlan).to.eql('YEARLY');",
-                  "  pm.expect(p.maxActiveUrls).to.eql(500);",
+                  "  pm.expect(p.linkLimit).to.eql(2000);",
+                  "  pm.expect(p.limitPeriod).to.eql('YEAR');",
+                  "  pm.expect(p.customCodes).to.eql(true);",
                   "  pm.expect(p.linkLifetimeDays).to.eql(null);",
                   "  pm.expect(p.redirectStatus).to.eql(302);",
                   "});"
@@ -858,6 +871,225 @@
                 "v1",
                 "urls",
                 "{{urlId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create with a custom URL",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A new code per run; sent in mixed case to show codes are not case sensitive.",
+                  "pm.collectionVariables.set('customCode', 'Pm-' + Date.now().toString(36));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Stored in lower case', () => pm.expect(pm.response.json().data.shortUrl).to.eql(pm.collectionVariables.get('customCode').toLowerCase()));",
+                  "pm.test('Paid links do not expire', () => pm.expect(pm.response.json().data.expiresAt).to.eql(null));",
+                  "pm.collectionVariables.set('customId', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/shorten",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "shorten"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"originalUrl\": \"https://example.com/custom\",\n  \"customCode\": \"{{customCode}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Custom URL already taken (expect 409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/shorten",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "shorten"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"originalUrl\": \"https://example.com/other\",\n  \"customCode\": \"{{customCode}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Reserved custom URL (expect 400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/shorten",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "shorten"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"originalUrl\": \"https://example.com/other\",\n  \"customCode\": \"admin\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Custom URL redirects in any case",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Upper-cased on purpose.",
+                  "pm.variables.set('customCode', pm.collectionVariables.get('customCode').toUpperCase());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 302', () => pm.response.to.have.status(302));",
+                  "pm.test('Location', () => pm.expect(pm.response.headers.get('Location')).to.include('/custom'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/{{customCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "{{customCode}}"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "Plan counts links created this year",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('The custom link was counted', () => pm.expect(pm.response.json().data.linksUsed).to.be.at.least(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/account/plan",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "account",
+                "plan"
               ]
             }
           }
@@ -1110,7 +1342,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Counts the link', () => pm.expect(pm.response.json().data.totalUrls).to.eql(1));"
+                  "pm.test('Counts both links', () => pm.expect(pm.response.json().data.totalUrls).to.eql(2));"
                 ]
               }
             }
@@ -1226,6 +1458,7 @@
                   "  pm.expect(p.subscribedPlan).to.eql('MONTHLY');",
                   "  pm.expect(p.effectivePlan).to.eql('FREE');",
                   "  pm.expect(p.inGracePeriod).to.eql(false);",
+                  "  pm.expect(p.paidLinksExpireAt, 'links made while paid get 5 more days').to.be.a('string');",
                   "});"
                 ]
               }
@@ -1476,6 +1709,41 @@
                 "v1",
                 "urls",
                 "{{urlId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete custom URL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/{{customId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "{{customId}}"
               ]
             }
           }
