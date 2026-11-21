@@ -51,6 +51,34 @@ public class User  {
     /** End of the paid period; null for FREE. */
     private LocalDateTime planPeriodEnd;
 
+    // Written only by UserRepository.reservePeriodLink and releasePeriodLink, never by
+    // saving the entity, so a save with a stale copy cannot undo a count.
+
+    /** The paid period counted by periodLinksUsed. */
+    @Column(insertable = false, updatable = false)
+    private LocalDateTime periodLinksStart;
+
+    /** Links created in that period. */
+    @Column(nullable = false, insertable = false, updatable = false)
+    @org.hibernate.annotations.ColumnDefault("0")
+    private int periodLinksUsed;
+
+    public LocalDateTime getPeriodLinksStart() {
+        return periodLinksStart;
+    }
+
+    public void setPeriodLinksStart(LocalDateTime periodLinksStart) {
+        this.periodLinksStart = periodLinksStart;
+    }
+
+    public int getPeriodLinksUsed() {
+        return periodLinksUsed;
+    }
+
+    public void setPeriodLinksUsed(int periodLinksUsed) {
+        this.periodLinksUsed = periodLinksUsed;
+    }
+
     public Plan getPlan() {
         return plan;
     }

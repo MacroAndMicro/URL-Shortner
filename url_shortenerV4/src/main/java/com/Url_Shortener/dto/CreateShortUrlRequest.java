@@ -14,7 +14,19 @@ public class CreateShortUrlRequest {
     )
     private String originalUrl;
 
+    /** Optional chosen short code (Yearly plan only); see ShortCode.normalizeCustom. */
+    @Size(max = 64, message = "Custom URL is too long")
+    private String customCode;
+
     public CreateShortUrlRequest() {
+    }
+
+    public String getCustomCode() {
+        return customCode;
+    }
+
+    public void setCustomCode(String customCode) {
+        this.customCode = customCode;
     }
 
     public CreateShortUrlRequest(String originalUrl) {

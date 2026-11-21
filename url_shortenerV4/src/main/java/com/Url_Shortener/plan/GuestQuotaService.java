@@ -80,7 +80,7 @@ public class GuestQuotaService {
                     .setIfAbsent(browserKey(guestId), "1", Plan.GUEST.linkLifetime());
             if (!Boolean.TRUE.equals(reserved)) {
                 throw LimitExceededException.forbidden(
-                        "Guests can have " + Plan.GUEST.maxActiveUrls()
+                        "Guests can have " + Plan.GUEST.linkLimit()
                                 + " active link at a time. Sign up free to create more.");
             }
         } catch (LimitExceededException e) {

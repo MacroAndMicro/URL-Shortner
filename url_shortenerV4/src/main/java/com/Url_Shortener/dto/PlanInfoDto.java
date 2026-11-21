@@ -13,10 +13,18 @@ import java.time.LocalDateTime;
  * @param periodEnd            end of the paid period; null for FREE
  * @param inGracePeriod        paid period ended, grace period not yet
  * @param graceEndsAt          when the user falls back to FREE; null for FREE
- * @param maxActiveUrls        link limit of the effective plan
- * @param activeUrls           links that have not expired
- * @param linkLifetimeDays     how long links last; null if forever
- * @param analytics            whether click analytics are available
+ * @param paidLinksExpireAt    if a paid plan lapsed, when the links made
+ *                             while paid stop working for good; else null
+ * @param linkLimit            the effective plan's link limit
+ * @param limitPeriod          what linkLimit counts: ACTIVE links at once, or
+ *                             links created per MONTH / YEAR
+ * @param linksUsed            links counted against linkLimit
+ * @param linkLifetimeDays     how long new links last; null while paid
+ * @param editWindowHours      how long after creation links can be changed;
+ *                             null if any time
+ * @param customCodes          whether the user can choose short codes
+ * @param analytics            whether click analytics are shown
+ * @param clickDetailRetentionDays how long individual clicks are kept
  * @param redirectStatus       301 or 302
  * @param devPlanSwitchEnabled whether the development plan switch is on
  */
@@ -26,10 +34,15 @@ public record PlanInfoDto(
         LocalDateTime periodEnd,
         boolean inGracePeriod,
         LocalDateTime graceEndsAt,
-        int maxActiveUrls,
-        long activeUrls,
+        LocalDateTime paidLinksExpireAt,
+        int linkLimit,
+        Plan.LimitPeriod limitPeriod,
+        long linksUsed,
         Long linkLifetimeDays,
+        Long editWindowHours,
+        boolean customCodes,
         boolean analytics,
+        long clickDetailRetentionDays,
         int redirectStatus,
         boolean devPlanSwitchEnabled) {
 }

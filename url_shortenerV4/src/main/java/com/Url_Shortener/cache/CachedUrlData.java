@@ -29,6 +29,7 @@ public class CachedUrlData implements Serializable {
     private final Integer clickCount;
     private final String createdDate;
     private final String updatedDate;
+    private final String expiresAt;
 
     @JsonCreator
     public CachedUrlData(
@@ -38,7 +39,8 @@ public class CachedUrlData implements Serializable {
             @JsonProperty("ownerUsername") String ownerUsername,
             @JsonProperty("clickCount") Integer clickCount,
             @JsonProperty("createdDate") String createdDate,
-            @JsonProperty("updatedDate") String updatedDate) {
+            @JsonProperty("updatedDate") String updatedDate,
+            @JsonProperty("expiresAt") String expiresAt) {
         this.shortUrl = shortUrl;
         this.originalUrl = originalUrl;
         this.ownerId = ownerId;
@@ -46,6 +48,7 @@ public class CachedUrlData implements Serializable {
         this.clickCount = clickCount;
         this.createdDate = createdDate;
         this.updatedDate = updatedDate;
+        this.expiresAt = expiresAt;
     }
 
     public String getShortUrl() {
@@ -76,6 +79,11 @@ public class CachedUrlData implements Serializable {
         return updatedDate;
     }
 
+    /** Stored link expiry; null for entries cached before it existed, or links without one. */
+    public String getExpiresAt() {
+        return expiresAt;
+    }
+
     /**
      * Factory method to create a CachedUrlData from a DynamoDB UrlMappingItem.
      */
@@ -87,7 +95,8 @@ public class CachedUrlData implements Serializable {
                 item.getOwnerUsername(),
                 item.getClickCount(),
                 item.getCreatedDate(),
-                item.getUpdatedDate()
+                item.getUpdatedDate(),
+                item.getExpiresAt()
         );
     }
 

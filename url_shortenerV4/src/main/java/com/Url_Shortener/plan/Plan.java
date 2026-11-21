@@ -7,45 +7,80 @@ import java.time.Duration;
  * be changed in one place.
  *
  * <ul>
- *   <li>maxActiveUrls: links that have not expired. For GUEST it applies per
- *       browser (see GuestQuotaService), with a separate per-IP daily cap.</li>
- *   <li>linkLifetime: how long a link works and stays in history after it is
- *       created; null means forever. Evaluated against the owner's current
- *       plan, so the rules of a lapsed subscription follow the user.</li>
- *   <li>analytics: click tracking and the analytics endpoints. Plans without
- *       analytics redirect with 301, which browsers cache, so later clicks
+ *   <li>linkLimit / limitPeriod: ACTIVE means at most this many working
+ *       links at once (for GUEST, per browser; see GuestQuotaService).
+ *       MONTH / YEAR mean at most this many links created per paid period;
+ *       deleting a link does not give it back.</li>
+ *   <li>linkLifetime: how long a link works and is shown after it is
+ *       created; null means for as long as the plan is paid.</li>
+ *   <li>editWindow: how long after creation the destination can be changed;
+ *       null means any time. Deleting is always allowed.</li>
+ *   <li>clickDetailRetention: how long individual clicks are kept. Daily
+ *       totals are kept for as long as the link exists.</li>
+ *   <li>analytics: click analytics are shown. Plans without analytics
+ *       redirect with 301, which browsers cache, so repeat clicks mostly
  *       never reach the server; paid plans redirect with 302 so every click
  *       is counted.</li>
+ *   <li>customCodes: the user may choose the short code.</li>
  * </ul>
  */
 public enum Plan {
 
-    GUEST(1, Duration.ofDays(5), false),
-    FREE(50, Duration.ofDays(5), false),
-    MONTHLY(150, null, true),
-    YEARLY(500, null, true);
+    GUEST(1, LimitPeriod.ACTIVE, Duration.ofDays(5), null, Duration.ofDays(30), false, false),
+    FREE(50, LimitPeriod.ACTIVE, Duration.ofDays(5), Duration.ofHours(3), Duration.ofDays(30), false, false),
+    MONTHLY(150, LimitPeriod.MONTH, null, null, Duration.ofDays(90), true, false),
+    YEARLY(2000, LimitPeriod.YEAR, null, null, Duration.ofDays(3 * 365), true, true);
 
-    private final int maxActiveUrls;
+    /** What linkLimit counts. */
+    public enum LimitPeriod { ACTIVE, MONTH, YEAR }
+
+    private final int linkLimit;
+    private final LimitPeriod limitPeriod;
     private final Duration linkLifetime;
+    private final Duration editWindow;
+    private final Duration clickDetailRetention;
     private final boolean analytics;
+    private final boolean customCodes;
 
-    Plan(int maxActiveUrls, Duration linkLifetime, boolean analytics) {
-        this.maxActiveUrls = maxActiveUrls;
+    Plan(int linkLimit, LimitPeriod limitPeriod, Duration linkLifetime, Duration editWindow,
+         Duration clickDetailRetention, boolean analytics, boolean customCodes) {
+        this.linkLimit = linkLimit;
+        this.limitPeriod = limitPeriod;
         this.linkLifetime = linkLifetime;
+        this.editWindow = editWindow;
+        this.clickDetailRetention = clickDetailRetention;
         this.analytics = analytics;
+        this.customCodes = customCodes;
     }
 
-    public int maxActiveUrls() {
-        return maxActiveUrls;
+    public int linkLimit() {
+        return linkLimit;
     }
 
-    /** Null when links never expire. */
+    public LimitPeriod limitPeriod() {
+        return limitPeriod;
+    }
+
+    /** Null when links last as long as the plan is paid. */
     public Duration linkLifetime() {
         return linkLifetime;
     }
 
+    /** Null when links can be edited any time. */
+    public Duration editWindow() {
+        return editWindow;
+    }
+
+    public Duration clickDetailRetention() {
+        return clickDetailRetention;
+    }
+
     public boolean analytics() {
         return analytics;
+    }
+
+    public boolean customCodes() {
+        return customCodes;
     }
 
     public boolean permanentRedirect() {

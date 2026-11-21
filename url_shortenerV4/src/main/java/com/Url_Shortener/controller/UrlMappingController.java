@@ -42,7 +42,8 @@ public class UrlMappingController {
     public ResponseEntity<ApiResponse<UrlMappingDto>> createShortUrl(@Valid @RequestBody CreateShortUrlRequest request,
                                                                       Principal principal){
         User user = userService.findByUsername(principal.getName());
-        UrlMappingDto urlMappingDTO = urlMappingService.createShortUrl(request.getOriginalUrl(), user);
+        UrlMappingDto urlMappingDTO = urlMappingService.createShortUrl(
+                request.getOriginalUrl(), request.getCustomCode(), user);
         return ResponseEntity.ok(ApiResponse.success(urlMappingDTO, "Short URL created successfully"));
     }
 

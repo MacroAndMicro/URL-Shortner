@@ -191,8 +191,10 @@ class UrlShortenerIT {
 
         JsonNode plan = data(get("/api/v1/account/plan", token));
         assertThat(plan.get("effectivePlan").asText()).isEqualTo("FREE");
-        assertThat(plan.get("maxActiveUrls").asInt()).isEqualTo(50);
-        assertThat(plan.get("activeUrls").asInt()).isEqualTo(1);
+        assertThat(plan.get("linkLimit").asInt()).isEqualTo(50);
+        assertThat(plan.get("limitPeriod").asText()).isEqualTo("ACTIVE");
+        assertThat(plan.get("editWindowHours").asInt()).isEqualTo(3);
+        assertThat(plan.get("linksUsed").asInt()).isEqualTo(1);
         assertThat(plan.get("redirectStatus").asInt()).isEqualTo(301);
     }
 
@@ -202,7 +204,9 @@ class UrlShortenerIT {
 
         JsonNode plan = changePlan("YEARLY");
         assertThat(plan.get("effectivePlan").asText()).isEqualTo("YEARLY");
-        assertThat(plan.get("maxActiveUrls").asInt()).isEqualTo(500);
+        assertThat(plan.get("linkLimit").asInt()).isEqualTo(2000);
+        assertThat(plan.get("limitPeriod").asText()).isEqualTo("YEAR");
+        assertThat(plan.get("customCodes").asBoolean()).isTrue();
 
         assertThat(get("/" + created.get("shortUrl").asText(), null).statusCode()).isEqualTo(302);
         assertThat(get("/api/v1/urls/dashboard", token).statusCode()).isEqualTo(200);
@@ -219,6 +223,61 @@ class UrlShortenerIT {
         JsonNode lapsed = changePlan("MONTHLY", LocalDateTime.now().minusDays(8));
         assertThat(lapsed.get("subscribedPlan").asText()).isEqualTo("MONTHLY");
         assertThat(lapsed.get("effectivePlan").asText()).isEqualTo("FREE");
+        assertThat(lapsed.get("paidLinksExpireAt").isNull()).isFalse();
+    }
+
+    @Test
+    void yearlyUsersChooseCustomCodesThatWorkInAnyCase() throws Exception {
+        String code = "IT-" + UUID.randomUUID().toString().substring(0, 8);
+        HttpResponse<String> refused = post("/api/v1/urls/shorten",
+                Map.of("originalUrl", "https://example.com/custom", "customCode", code), token);
+        assertThat(refused.statusCode()).isEqualTo(403);
+
+        changePlan("YEARLY");
+        JsonNode created = data(post("/api/v1/urls/shorten",
+                Map.of("originalUrl", "https://example.com/custom", "customCode", code), token));
+        assertThat(created.get("shortUrl").asText()).isEqualTo(code.toLowerCase());
+
+        HttpResponse<String> redirect = get("/" + code.toUpperCase(), null);
+        assertThat(redirect.statusCode()).isEqualTo(302);
+        assertThat(redirect.headers().firstValue("Location")).contains("https://example.com/custom");
+
+        HttpResponse<String> taken = post("/api/v1/urls/shorten",
+                Map.of("originalUrl", "https://example.com/other", "customCode", code.toLowerCase()), token);
+        assertThat(taken.statusCode()).isEqualTo(409);
+
+        assertThat(post("/api/v1/urls/shorten",
+                Map.of("originalUrl", "https://example.com/other", "customCode", "admin"), token).statusCode())
+                .isEqualTo(400);
+    }
+
+    @Test
+    void paidLimitCountsCreationsAndDeletingDoesNotGiveThemBack() throws Exception {
+        JsonNode plan = changePlan("MONTHLY");
+        assertThat(plan.get("limitPeriod").asText()).isEqualTo("MONTH");
+        assertThat(plan.get("linksUsed").asInt()).isZero();
+
+        JsonNode created = shorten("https://example.com/quota");
+        HttpRequest delete = request("/api/v1/urls/" + created.get("id").asText(), token).DELETE().build();
+        assertThat(http.send(delete, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(200);
+        shorten("https://example.com/quota-2");
+
+        assertThat(data(get("/api/v1/account/plan", token)).get("linksUsed").asInt()).isEqualTo(2);
+    }
+
+    @Test
+    void freeLinksCanBeEditedRightAfterCreation() throws Exception {
+        JsonNode created = shorten("https://example.com/edit");
+        HttpRequest patch = request("/api/v1/urls/" + created.get("id").asText(), token)
+                .header("Content-Type", "application/json")
+                .method("PATCH", HttpRequest.BodyPublishers.ofString("{\"originalUrl\":\"https://example.com/edited\"}"))
+                .build();
+
+        HttpResponse<String> response = http.send(patch, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
+        assertThat(get("/" + created.get("shortUrl").asText(), null).headers().firstValue("Location"))
+                .contains("https://example.com/edited");
     }
 
     @Test

@@ -4,7 +4,9 @@ import com.Url_Shortener.dto.ApiResponse;
 import com.Url_Shortener.dto.PlanInfoDto;
 import com.Url_Shortener.entity.User;
 import com.Url_Shortener.plan.Plan;
+import com.Url_Shortener.plan.OwnerStatus;
 import com.Url_Shortener.plan.PlanService;
+import com.Url_Shortener.plan.SubscriptionService;
 import com.Url_Shortener.service.UrlMappingService;
 import com.Url_Shortener.service.UserService;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,14 +27,17 @@ public class AccountController {
 
     private final UserService userService;
     private final PlanService planService;
+    private final SubscriptionService subscriptionService;
     private final UrlMappingService urlMappingService;
     private final boolean devPlanSwitchEnabled;
 
     public AccountController(UserService userService, PlanService planService,
+                             SubscriptionService subscriptionService,
                              UrlMappingService urlMappingService,
                              @Value("${app.dev.plan-switch-enabled:false}") boolean devPlanSwitchEnabled) {
         this.userService = userService;
         this.planService = planService;
+        this.subscriptionService = subscriptionService;
         this.urlMappingService = urlMappingService;
         this.devPlanSwitchEnabled = devPlanSwitchEnabled;
     }
@@ -77,22 +82,32 @@ public class AccountController {
         } else if (periodEnd == null && request.plan() == Plan.YEARLY) {
             periodEnd = planService.now().plusYears(1);
         }
-        User updated = planService.changeSubscription(user, request.plan(), periodEnd);
+        User updated = subscriptionService.changeSubscription(user, request.plan(), periodEnd);
         return ResponseEntity.ok(ApiResponse.success(planInfo(updated), "Plan changed"));
     }
 
     private PlanInfoDto planInfo(User user) {
-        Plan effective = planService.effectivePlan(user);
+        OwnerStatus status = planService.status(user);
+        Plan effective = status.effective();
+        LocalDateTime lapsedAt = status.lapsedAt();
+        long linksUsed = effective.limitPeriod() == Plan.LimitPeriod.ACTIVE
+                ? urlMappingService.countActiveUrls(user)
+                : urlMappingService.linksCreatedThisPeriod(user);
         return new PlanInfoDto(
                 user.getPlan(),
                 effective,
                 user.getPlanPeriodEnd(),
                 planService.inGracePeriod(user),
                 planService.graceEndsAt(user),
-                effective.maxActiveUrls(),
-                urlMappingService.countActiveUrls(user),
+                lapsedAt != null ? lapsedAt.plus(Plan.FREE.linkLifetime()) : null,
+                effective.linkLimit(),
+                effective.limitPeriod(),
+                linksUsed,
                 effective.linkLifetime() != null ? effective.linkLifetime().toDays() : null,
+                effective.editWindow() != null ? effective.editWindow().toHours() : null,
+                effective.customCodes(),
                 effective.analytics(),
+                effective.clickDetailRetention().toDays(),
                 effective.permanentRedirect() ? 301 : 302,
                 devPlanSwitchEnabled);
     }

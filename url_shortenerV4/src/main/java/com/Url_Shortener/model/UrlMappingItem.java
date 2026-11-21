@@ -45,6 +45,7 @@ public class UrlMappingItem {
     private String createdDate;
     private String updatedDate;
     private String ownerUrlKey;
+    private String expiresAt;
 
     public UrlMappingItem() {
     }
@@ -120,6 +121,18 @@ public class UrlMappingItem {
 
     public void setUpdatedDate(String updatedDate) {
         this.updatedDate = updatedDate;
+    }
+
+    /**
+     * When the link stops working (ISO date-time), when known up front or
+     * fixed by a plan change; null otherwise. See PlanService.linkExpiresAt.
+     */
+    public String getExpiresAt() {
+        return expiresAt;
+    }
+
+    public void setExpiresAt(String expiresAt) {
+        this.expiresAt = expiresAt;
     }
 
     @DynamoDbSecondaryPartitionKey(indexNames = {"ownerUrl-index"})

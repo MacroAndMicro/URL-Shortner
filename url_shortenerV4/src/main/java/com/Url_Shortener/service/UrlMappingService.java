@@ -9,17 +9,21 @@ import com.Url_Shortener.dto.DashboardDto;
 import com.Url_Shortener.dto.UrlMappingDto;
 import com.Url_Shortener.entity.User;
 import com.Url_Shortener.event.ClickEventCreatedEvent;
+import com.Url_Shortener.exception.ConflictException;
 import com.Url_Shortener.exception.LimitExceededException;
 import com.Url_Shortener.exception.UrlMappingNotFoundException;
 import com.Url_Shortener.metrics.UrlShortenerMetrics;
 import com.Url_Shortener.model.UrlMappingItem;
 import com.Url_Shortener.plan.GuestQuotaService;
+import com.Url_Shortener.plan.OwnerStatus;
 import com.Url_Shortener.plan.Plan;
 import com.Url_Shortener.plan.PlanService;
 import com.Url_Shortener.publisher.AnalyticsPublisher;
 import com.Url_Shortener.repository.UrlMappingDynamoRepository;
+import com.Url_Shortener.repository.UserRepository;
 import com.Url_Shortener.security.IpHasher;
 import com.Url_Shortener.shortcode.Base62;
+import com.Url_Shortener.shortcode.ShortCode;
 import com.Url_Shortener.shortcode.SnowflakeIdGenerator;
 import com.Url_Shortener.storage.AnalyticsStorage;
 
@@ -32,6 +36,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -46,11 +51,10 @@ import java.util.stream.Collectors;
  * to MongoDB and updates clickCount in DynamoDB, so clickCount
  * and analytics are eventually consistent with redirects.
  *
- * Plan rules (see Plan) are applied here: link limits, link expiry,
- * 301 vs 302 redirects, and which users get analytics. Expiry is
- * evaluated against the owner's current plan whenever a link is used,
- * so expired links stop resolving and drop out of history without a
- * cleanup job.
+ * Plan rules (see Plan and PlanService) are applied here: link limits,
+ * link expiry, edit window, custom codes, 301 vs 302 redirects, and who
+ * sees analytics. Expired links stop resolving and are hidden at once;
+ * LinkCleanupJob deletes their data later.
  */
 @Service
 public class UrlMappingService {
@@ -72,6 +76,7 @@ public class UrlMappingService {
     private final SnowflakeIdGenerator idGenerator;
     private final PlanService planService;
     private final GuestQuotaService guestQuotaService;
+    private final UserRepository userRepository;
 
     public UrlMappingService(UrlMappingDynamoRepository urlMappingRepository,
                              AnalyticsStorage analyticsStorage,
@@ -81,7 +86,8 @@ public class UrlMappingService {
                              IpHasher ipHasher,
                              SnowflakeIdGenerator idGenerator,
                              PlanService planService,
-                             GuestQuotaService guestQuotaService) {
+                             GuestQuotaService guestQuotaService,
+                             UserRepository userRepository) {
         this.urlMappingRepository = urlMappingRepository;
         this.analyticsStorage = analyticsStorage;
         this.analyticsPublisher = analyticsPublisher;
@@ -91,79 +97,143 @@ public class UrlMappingService {
         this.idGenerator = idGenerator;
         this.planService = planService;
         this.guestQuotaService = guestQuotaService;
+        this.userRepository = userRepository;
     }
 
     // ============================================================
     // CREATE
     // ============================================================
 
-    /**
-     * Creates a new short URL for a signed-in user. Returns the user's
-     * existing active link if they already shortened this URL; otherwise
-     * fails if the plan's link limit is reached.
-     */
     public UrlMappingDto createShortUrl(String originalUrl, User user) {
+        return createShortUrl(originalUrl, null, user);
+    }
+
+    /**
+     * Creates a short URL for a signed-in user, with a chosen code when
+     * customCode is given (plans with custom codes only). Without one, returns
+     * the user's existing working link for the same URL if there is one.
+     * Fails if the plan's link limit is reached.
+     */
+    public UrlMappingDto createShortUrl(String originalUrl, String customCode, User user) {
         var sample = metrics.startTimer();
-        Plan plan = planService.effectivePlan(user);
+        OwnerStatus status = planService.status(user);
+        Plan plan = status.effective();
 
-        metrics.incrementDynamoRead();
-        Optional<UrlMappingItem> existing = urlMappingRepository
-                .findByOwnerAndOriginalUrl(user.getId(), originalUrl).stream()
-                .filter(item -> isActive(item, plan))
-                .findFirst();
-        if (existing.isPresent()) {
+        String code = null;
+        if (customCode != null && !customCode.isBlank()) {
+            if (!plan.customCodes()) {
+                throw LimitExceededException.forbidden("Custom URLs are available on the Yearly plan.");
+            }
+            code = ShortCode.normalizeCustom(customCode);
+        } else {
+            metrics.incrementDynamoRead();
+            Optional<UrlMappingItem> existing = urlMappingRepository
+                    .findByOwnerAndOriginalUrl(user.getId(), originalUrl).stream()
+                    .filter(item -> isActive(item, status))
+                    .findFirst();
+            if (existing.isPresent()) {
+                metrics.stopUrlCreationTime(sample);
+                return convertToDto(existing.get(), status);
+            }
+        }
+
+        LocalDateTime periodStart = reserveLink(user, status);
+        try {
+            UrlMappingItem item = newItem(originalUrl, plan);
+            item.setOwnerId(user.getId());
+            item.setOwnerUsername(user.getUsername());
+            if (code == null) {
+                item.setOwnerUrlKey(UrlMappingItem.ownerUrlKey(user.getId(), originalUrl));
+                save(item);
+            } else {
+                // Custom links skip the duplicate check, so they are not indexed for it.
+                saveCustom(item, code);
+            }
             metrics.stopUrlCreationTime(sample);
-            return convertToDto(existing.get(), plan);
+            return convertToDto(item, status);
+        } catch (RuntimeException e) {
+            if (periodStart != null) {
+                userRepository.releasePeriodLink(user.getId(), periodStart);
+            }
+            throw e;
         }
+    }
 
-        long active = countActiveUrls(user, plan);
-        if (active >= plan.maxActiveUrls()) {
-            throw LimitExceededException.forbidden("You have reached the limit of " + plan.maxActiveUrls()
-                    + " active links on the " + plan.displayName() + " plan.");
+    /**
+     * Checks the plan's link limit, and for per-period limits counts the new
+     * link. Returns the period start counted against, or null if nothing was
+     * counted (so nothing needs giving back on failure).
+     */
+    private LocalDateTime reserveLink(User user, OwnerStatus status) {
+        Plan plan = status.effective();
+        if (plan.limitPeriod() == Plan.LimitPeriod.ACTIVE) {
+            if (countActiveUrls(user, status) >= plan.linkLimit()) {
+                throw LimitExceededException.forbidden("You have reached the limit of " + plan.linkLimit()
+                        + " active links on the " + plan.displayName() + " plan.");
+            }
+            return null;
         }
-
-        UrlMappingItem item = newItem(originalUrl);
-        item.setOwnerId(user.getId());
-        item.setOwnerUrlKey(UrlMappingItem.ownerUrlKey(user.getId(), originalUrl));
-        item.setOwnerUsername(user.getUsername());
-        save(item);
-
-        metrics.stopUrlCreationTime(sample);
-        return convertToDto(item, plan);
+        LocalDateTime periodStart = planService.periodStart(status);
+        if (userRepository.reservePeriodLink(user.getId(), periodStart, plan.linkLimit()) == 0) {
+            String period = plan.limitPeriod().name().toLowerCase(Locale.ROOT);
+            throw LimitExceededException.forbidden("You have created " + plan.linkLimit()
+                    + " links this " + period + ", the limit of the " + plan.displayName()
+                    + " plan. More become available when your plan renews.");
+        }
+        return periodStart;
     }
 
     /**
      * Creates a short URL for a visitor without an account, within the guest
-     * limits (one active link per browser, a daily cap per IP). Guest links
+     * limits (one working link per browser, a daily cap per IP). Guest links
      * have no owner, so they cannot be listed, edited or deleted.
      */
-    public UrlMappingDto createGuestShortUrl(String originalUrl, String guestId, String ipAddress) {
+    public UrlMappingDto createGuestShortUrl(String originalUrl, String customCode, String guestId,
+                                             String ipAddress) {
+        if (customCode != null && !customCode.isBlank()) {
+            throw LimitExceededException.forbidden("Custom URLs are available on the Yearly plan.");
+        }
         var sample = metrics.startTimer();
         guestQuotaService.acquire(guestId, ipAddress);
         try {
-            UrlMappingItem item = newItem(originalUrl);
+            UrlMappingItem item = newItem(originalUrl, Plan.GUEST);
             save(item);
             metrics.stopUrlCreationTime(sample);
-            return convertToDto(item, Plan.GUEST);
+            return convertToDto(item, OwnerStatus.GUEST);
         } catch (RuntimeException e) {
             guestQuotaService.release(guestId);
             throw e;
         }
     }
 
-    private UrlMappingItem newItem(String originalUrl) {
+    private UrlMappingItem newItem(String originalUrl, Plan plan) {
         UrlMappingItem item = new UrlMappingItem();
         item.setOriginalUrl(originalUrl);
         item.setClickCount(0);
         String now = planService.now().format(ISO);
         item.setCreatedDate(now);
         item.setUpdatedDate(now);
+        item.setExpiresAt(format(planService.newLinkExpiresAt(plan)));
         return item;
     }
 
     private void save(UrlMappingItem item) {
         metrics.incrementDynamoWrite();
         saveWithUniqueShortUrl(item);
+        cached(item);
+    }
+
+    private void saveCustom(UrlMappingItem item, String code) {
+        item.setId(idGenerator.nextId());
+        item.setShortUrl(code);
+        metrics.incrementDynamoWrite();
+        if (!urlMappingRepository.saveIfNotExists(item)) {
+            throw new ConflictException("The custom URL '" + code + "' is already taken.");
+        }
+        cached(item);
+    }
+
+    private void cached(UrlMappingItem item) {
         // Best-effort: if Redis is unavailable, the cache is filled on the next redirect.
         cacheService.put(item.getShortUrl(), CachedUrlData.from(item));
         metrics.incrementUrlCreation();
@@ -187,23 +257,29 @@ public class UrlMappingService {
     // PLAN HELPERS
     // ============================================================
 
-    /** Links the user has that have not expired under their current plan. */
+    /** Links the user has that still work. */
     public long countActiveUrls(User user) {
-        return countActiveUrls(user, planService.effectivePlan(user));
+        return countActiveUrls(user, planService.status(user));
     }
 
-    private long countActiveUrls(User user, Plan plan) {
-        return urlMappingRepository.countByOwnerId(user.getId(), activeSince(plan));
+    private long countActiveUrls(User user, OwnerStatus status) {
+        return urlMappingRepository.countByOwnerId(user.getId(),
+                format(planService.activeLinksCreatedAfter(status)), format(planService.now()));
     }
 
-    /** ISO date-time before which links are expired under plan; null if they never expire. */
-    private String activeSince(Plan plan) {
-        LocalDateTime since = planService.activeLinksCreatedAfter(plan);
-        return since != null ? since.format(ISO) : null;
+    /** Links created in the current paid period; 0 when not on a paid plan. */
+    public int linksCreatedThisPeriod(User user) {
+        LocalDateTime periodStart = planService.periodStart(planService.status(user));
+        return periodStart != null && periodStart.equals(user.getPeriodLinksStart())
+                ? user.getPeriodLinksUsed() : 0;
     }
 
-    private boolean isActive(UrlMappingItem item, Plan plan) {
-        return planService.isLinkActive(parse(item.getCreatedDate()), plan);
+    private LocalDateTime expiresAt(UrlMappingItem item, OwnerStatus owner) {
+        return planService.linkExpiresAt(parse(item.getCreatedDate()), parse(item.getExpiresAt()), owner);
+    }
+
+    private boolean isActive(UrlMappingItem item, OwnerStatus owner) {
+        return planService.isActive(expiresAt(item, owner));
     }
 
     private void requireAnalytics(User user) {
@@ -212,11 +288,22 @@ public class UrlMappingService {
         }
     }
 
+    /** The user's links that still work. For analytics, which only paid plans see. */
+    private List<UrlMappingItem> activeUrlsOf(User user, OwnerStatus status) {
+        return urlMappingRepository.findByOwnerId(user.getId()).stream()
+                .filter(item -> isActive(item, status))
+                .toList();
+    }
+
     private static LocalDateTime parse(String isoDateTime) {
         return isoDateTime != null ? LocalDateTime.parse(isoDateTime, ISO) : null;
     }
 
-    private UrlMappingDto convertToDto(UrlMappingItem item, Plan plan) {
+    private static String format(LocalDateTime dateTime) {
+        return dateTime != null ? dateTime.format(ISO) : null;
+    }
+
+    private UrlMappingDto convertToDto(UrlMappingItem item, OwnerStatus owner) {
         UrlMappingDto dto = new UrlMappingDto();
         dto.setId(item.getId());
         dto.setOriginalUrl(item.getOriginalUrl());
@@ -224,7 +311,7 @@ public class UrlMappingService {
         dto.setClickCount(clickCountOf(item));
         dto.setCreatedDate(parse(item.getCreatedDate()));
         dto.setUsername(item.getOwnerUsername());
-        dto.setExpiresAt(planService.linkExpiresAt(dto.getCreatedDate(), plan));
+        dto.setExpiresAt(expiresAt(item, owner));
         return dto;
     }
 
@@ -237,23 +324,24 @@ public class UrlMappingService {
     // ============================================================
 
     /**
-     * Returns one page of a user's active URL mappings, ordered by creation
-     * date. Expired links are left out. The cursor comes from the previous
-     * page's nextCursor (null for the first page) and is only valid for the
-     * sort direction it was issued with.
+     * Returns one page of the user's working links, ordered by creation date.
+     * The cursor comes from the previous page's nextCursor (null for the first
+     * page) and is only valid for the sort direction it was issued with.
      */
     public CursorPageDto<UrlMappingDto> getUrlsByUser(User user, int size, String cursor, boolean ascending) {
-        Plan plan = planService.effectivePlan(user);
-        String since = activeSince(plan);
+        OwnerStatus status = planService.status(user);
+        String since = format(planService.activeLinksCreatedAfter(status));
+        String now = format(planService.now());
         UrlMappingDynamoRepository.DynamoPageResult<UrlMappingItem> result =
                 urlMappingRepository.findByOwnerIdPaginated(
-                        user.getId(), size, PageCursor.decode(cursor), ascending, since);
+                        user.getId(), size, PageCursor.decode(cursor), ascending, since, now);
 
         List<UrlMappingDto> dtos = result.getItems().stream()
-                .map(item -> convertToDto(item, plan))
+                .filter(item -> isActive(item, status))
+                .map(item -> convertToDto(item, status))
                 .toList();
 
-        long total = urlMappingRepository.countByOwnerId(user.getId(), since);
+        long total = urlMappingRepository.countByOwnerId(user.getId(), since, now);
 
         return new CursorPageDto<>(dtos, PageCursor.encode(result.getLastEvaluatedKey()), size, total);
     }
@@ -264,7 +352,10 @@ public class UrlMappingService {
 
     /**
      * Resolves a short URL. Returns empty when the code does not exist or
-     * its link has expired under the owner's current plan.
+     * its link has expired.
+     *
+     * Generated codes are case sensitive; custom codes are stored in lower
+     * case, so a code that is not found as typed is tried in lower case.
      *
      * CACHE-ASIDE PATTERN:
      *   1. Look up Redis first. A hit needs no DynamoDB call.
@@ -272,63 +363,64 @@ public class UrlMappingService {
      *   3. Otherwise read from DynamoDB and populate Redis.
      *   4. If Redis is unavailable, every lookup falls back to DynamoDB.
      *
-     * Click events are published only for plans with analytics; clickCount
-     * is updated by the Kafka consumer, not here.
+     * Clicks are recorded for every plan; only paid plans are shown them.
+     * clickCount is updated by the Kafka consumer, not here.
      */
     public Optional<RedirectTarget> resolve(String shortUrl, String ipAddress, String referrer, String userAgent) {
         var totalSample = metrics.startTimer();
         metrics.incrementRedirectRequest();
 
-        var redisSample = metrics.startTimer();
-        Optional<CachedUrlData> cached = cacheService.get(shortUrl);
-        metrics.stopRedisLookupTime(redisSample);
-
-        String originalUrl;
-        Long ownerId;
-        String createdDate;
-        if (cached.isPresent()) {
-            metrics.incrementCacheHit();
-            originalUrl = cached.get().getOriginalUrl();
-            ownerId = cached.get().getOwnerId();
-            createdDate = cached.get().getCreatedDate();
-        } else {
-            metrics.incrementCacheMiss();
-            if (cacheService.isMarkedMissing(shortUrl)) {
-                return notFound(totalSample);
-            }
-
-            metrics.incrementDynamoRead();
-            var dynamoSample = metrics.startTimer();
-            Optional<UrlMappingItem> optItem = urlMappingRepository.findByShortUrl(shortUrl);
-            metrics.stopDynamoLookupTime(dynamoSample);
-
-            if (optItem.isEmpty()) {
-                cacheService.markMissing(shortUrl);
-                return notFound(totalSample);
-            }
-            UrlMappingItem item = optItem.get();
-            cacheService.put(shortUrl, CachedUrlData.from(item));
-            originalUrl = item.getOriginalUrl();
-            ownerId = item.getOwnerId();
-            createdDate = item.getCreatedDate();
+        Optional<CachedUrlData> found = lookup(shortUrl);
+        String lowerCase = shortUrl.toLowerCase(Locale.ROOT);
+        if (found.isEmpty() && !lowerCase.equals(shortUrl)) {
+            found = lookup(lowerCase);
         }
+        if (found.isEmpty()) {
+            return notFound(totalSample);
+        }
+        CachedUrlData link = found.get();
 
-        Plan plan = planService.effectivePlanForOwner(ownerId);
-        LocalDateTime expiresAt = planService.linkExpiresAt(parse(createdDate), plan);
+        OwnerStatus owner = planService.ownerStatus(link.getOwnerId());
+        LocalDateTime expiresAt = planService.linkExpiresAt(
+                parse(link.getCreatedDate()), parse(link.getExpiresAt()), owner);
         LocalDateTime now = planService.now();
         if (expiresAt != null && !now.isBefore(expiresAt)) {
-            // Not marked missing: the owner may upgrade, which revives it.
             return notFound(totalSample);
         }
 
-        if (plan.analytics()) {
-            logClickEvent(shortUrl, ipAddress, referrer, userAgent);
-        }
+        logClickEvent(link.getShortUrl(), ipAddress, referrer, userAgent);
         metrics.stopRedirectTotalTime(totalSample);
         metrics.incrementRedirectSuccess();
 
         Long maxAge = expiresAt != null ? Duration.between(now, expiresAt).toSeconds() : null;
-        return Optional.of(new RedirectTarget(originalUrl, plan.permanentRedirect(), maxAge));
+        return Optional.of(new RedirectTarget(link.getOriginalUrl(), owner.effective().permanentRedirect(), maxAge));
+    }
+
+    /** The link stored under exactly this code, from Redis or DynamoDB. */
+    private Optional<CachedUrlData> lookup(String code) {
+        var redisSample = metrics.startTimer();
+        Optional<CachedUrlData> cached = cacheService.get(code);
+        metrics.stopRedisLookupTime(redisSample);
+        if (cached.isPresent()) {
+            metrics.incrementCacheHit();
+            return cached;
+        }
+        metrics.incrementCacheMiss();
+        if (cacheService.isMarkedMissing(code)) {
+            return Optional.empty();
+        }
+
+        metrics.incrementDynamoRead();
+        var dynamoSample = metrics.startTimer();
+        Optional<UrlMappingItem> item = urlMappingRepository.findByShortUrl(code);
+        metrics.stopDynamoLookupTime(dynamoSample);
+        if (item.isEmpty()) {
+            cacheService.markMissing(code);
+            return Optional.empty();
+        }
+        CachedUrlData data = CachedUrlData.from(item.get());
+        cacheService.put(code, data);
+        return Optional.of(data);
     }
 
     private Optional<RedirectTarget> notFound(io.micrometer.core.instrument.Timer.Sample totalSample) {
@@ -361,28 +453,37 @@ public class UrlMappingService {
      * Finds a URL mapping by its numeric ID, verifying user ownership.
      */
     public UrlMappingDto getUrlByIdAndUser(Long id, User user) {
-        Plan plan = planService.effectivePlan(user);
-        return convertToDto(findOwnedItem(id, user, plan), plan);
+        OwnerStatus status = planService.status(user);
+        return convertToDto(findOwnedItem(id, user, status), status);
     }
 
     /** The user's link with this id; expired links count as not found. */
-    private UrlMappingItem findOwnedItem(Long id, User user, Plan plan) {
+    private UrlMappingItem findOwnedItem(Long id, User user, OwnerStatus status) {
         return urlMappingRepository.findByIdAndOwnerId(id, user.getId())
-                .filter(item -> isActive(item, plan))
+                .filter(item -> isActive(item, status))
                 .orElseThrow(() -> new UrlMappingNotFoundException("URL mapping not found or access denied"));
     }
 
     /**
-     * Updates the original URL for a given mapping. Only the changed attributes
-     * are written, so concurrent click count increments are not lost.
+     * Changes where a link points, within the plan's edit window. Only the
+     * changed attributes are written, so concurrent click count increments
+     * are not lost.
      */
     public UrlMappingDto updateUrl(Long id, String newOriginalUrl, User user) {
-        Plan plan = planService.effectivePlan(user);
-        UrlMappingItem item = findOwnedItem(id, user, plan);
+        OwnerStatus status = planService.status(user);
+        UrlMappingItem item = findOwnedItem(id, user, status);
+
+        Duration editWindow = status.effective().editWindow();
+        if (editWindow != null && !planService.now().isBefore(parse(item.getCreatedDate()).plus(editWindow))) {
+            throw LimitExceededException.forbidden(status.effective().displayName() + " links can be changed within "
+                    + editWindow.toHours() + " hours of creation. You can still delete this link.");
+        }
 
         if (newOriginalUrl != null && !newOriginalUrl.isBlank()) {
             String now = planService.now().format(ISO);
-            String ownerUrlKey = UrlMappingItem.ownerUrlKey(user.getId(), newOriginalUrl);
+            String ownerUrlKey = item.getOwnerUrlKey() != null
+                    ? UrlMappingItem.ownerUrlKey(user.getId(), newOriginalUrl)
+                    : null;  // custom links stay out of the duplicate check
             if (!urlMappingRepository.updateOriginalUrl(item.getShortUrl(), newOriginalUrl, ownerUrlKey, now)) {
                 throw new UrlMappingNotFoundException("URL mapping not found or access denied");
             }
@@ -394,18 +495,19 @@ public class UrlMappingService {
             cacheService.put(item.getShortUrl(), CachedUrlData.from(item));
         }
 
-        return convertToDto(item, plan);
+        return convertToDto(item, status);
     }
 
     /**
-     * Deletes a URL mapping and its associated click events.
+     * Deletes a URL mapping and its associated click data. Allowed on every
+     * plan at any time. For per-period limits, the link stays counted.
      *
      * NOTE: This is a cross-database operation with no distributed transaction.
      * The mapping is deleted first so that a MongoDB failure leaves orphaned
      * analytics rather than a live link with no history.
      */
     public void deleteUrl(Long id, User user) {
-        UrlMappingItem item = findOwnedItem(id, user, planService.effectivePlan(user));
+        UrlMappingItem item = findOwnedItem(id, user, planService.status(user));
 
         urlMappingRepository.deleteByShortUrl(item.getShortUrl());
 
@@ -420,7 +522,7 @@ public class UrlMappingService {
     // ============================================================
 
     /**
-     * Returns click event counts grouped by date for a specific URL.
+     * Returns click counts per day for a specific URL.
      */
     public List<ClickEventDto> getClickEventsByDate(String shortUrl, LocalDateTime start,
                                                      LocalDateTime end, User user) {
@@ -441,7 +543,7 @@ public class UrlMappingService {
     public List<ClickEventDto> getTotalClicksByUserAndDate(User user, LocalDate start, LocalDate end) {
         requireAnalytics(user);
         metrics.incrementAnalyticsRequest();
-        List<String> shortUrls = shortUrlsOf(urlMappingRepository.findByOwnerId(user.getId()));
+        List<String> shortUrls = shortUrlsOf(activeUrlsOf(user, planService.status(user)));
 
         return analyticsStorage.findAggregatedByShortUrlsAndDateBetween(
                 shortUrls, start.atStartOfDay(), end.plusDays(1).atStartOfDay());
@@ -454,7 +556,8 @@ public class UrlMappingService {
     }
 
     /**
-     * Returns detailed click events for a specific URL within a date range.
+     * Returns individual clicks on a specific URL within a date range, as far
+     * back as the plan keeps them.
      */
     public List<ClickEventDetailDto> getClickEventDetails(String shortUrl, LocalDateTime start,
                                                            LocalDateTime end, User user) {
@@ -472,13 +575,13 @@ public class UrlMappingService {
 
     /**
      * Builds a dashboard summary for the user.
-     * Aggregates data from DynamoDB (URL metadata) and MongoDB (click events).
+     * Aggregates data from DynamoDB (URL metadata) and MongoDB (click totals).
      */
     public DashboardDto getDashboard(User user) {
         requireAnalytics(user);
-        Plan plan = planService.effectivePlan(user);
+        OwnerStatus status = planService.status(user);
         metrics.incrementAnalyticsRequest();
-        List<UrlMappingItem> userUrls = urlMappingRepository.findByOwnerId(user.getId());
+        List<UrlMappingItem> userUrls = activeUrlsOf(user, status);
 
         long totalUrls = userUrls.size();
         long totalClicks = userUrls.stream().mapToLong(this::clickCountOf).sum();
@@ -492,7 +595,7 @@ public class UrlMappingService {
         LocalDateTime weekStart = todayStart.minusDays(7);
         long clicksThisWeek = analyticsStorage.countByShortUrlsAndDateBetween(shortUrls, weekStart, todayEnd);
 
-        List<UrlMappingDto> topUrls = topByTotalClicks(userUrls, 5, plan);
+        List<UrlMappingDto> topUrls = topByTotalClicks(userUrls, 5, status);
 
         return new DashboardDto(totalUrls, totalClicks, clicksToday, clicksThisWeek, topUrls);
     }
@@ -502,15 +605,15 @@ public class UrlMappingService {
      */
     public List<UrlMappingDto> getTopUrls(User user, int limit) {
         requireAnalytics(user);
-        return topByTotalClicks(urlMappingRepository.findByOwnerId(user.getId()), limit,
-                planService.effectivePlan(user));
+        OwnerStatus status = planService.status(user);
+        return topByTotalClicks(activeUrlsOf(user, status), limit, status);
     }
 
-    private List<UrlMappingDto> topByTotalClicks(List<UrlMappingItem> items, int limit, Plan plan) {
+    private List<UrlMappingDto> topByTotalClicks(List<UrlMappingItem> items, int limit, OwnerStatus status) {
         return items.stream()
                 .sorted(Comparator.comparingInt(this::clickCountOf).reversed())
                 .limit(limit)
-                .map(item -> convertToDto(item, plan))
+                .map(item -> convertToDto(item, status))
                 .toList();
     }
 
@@ -520,9 +623,9 @@ public class UrlMappingService {
      */
     public List<UrlMappingDto> getTopUrlsByDate(User user, int limit, LocalDate start, LocalDate end) {
         requireAnalytics(user);
-        Plan plan = planService.effectivePlan(user);
+        OwnerStatus status = planService.status(user);
         metrics.incrementAnalyticsRequest();
-        List<UrlMappingItem> userUrls = urlMappingRepository.findByOwnerId(user.getId());
+        List<UrlMappingItem> userUrls = activeUrlsOf(user, status);
         Map<String, Long> counts = analyticsStorage.countPerShortUrlAndDateBetween(
                 shortUrlsOf(userUrls), start.atStartOfDay(), end.plusDays(1).atStartOfDay());
 
@@ -531,7 +634,7 @@ public class UrlMappingService {
                         (UrlMappingItem item) -> counts.getOrDefault(item.getShortUrl(), 0L)).reversed())
                 .limit(limit)
                 .map(item -> {
-                    UrlMappingDto dto = convertToDto(item, plan);
+                    UrlMappingDto dto = convertToDto(item, status);
                     dto.setClickCount(counts.getOrDefault(item.getShortUrl(), 0L).intValue());
                     return dto;
                 })

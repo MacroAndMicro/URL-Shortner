@@ -72,10 +72,12 @@ public class InMemoryUrlMappingRepository extends UrlMappingDynamoRepository {
     public DynamoPageResult<UrlMappingItem> findByOwnerIdPaginated(Long ownerId, int pageSize,
                                                                     Map<String, String> lastEvaluatedKey,
                                                                     boolean ascending,
-                                                                    String createdAfter) {
+                                                                    String createdAfter,
+                                                                    String notExpiredAt) {
         List<UrlMappingItem> all = store.values().stream()
                 .filter(i -> ownerId.equals(i.getOwnerId()))
                 .filter(i -> createdAfter == null || i.getCreatedDate().compareTo(createdAfter) > 0)
+                .filter(i -> notExpired(i, notExpiredAt))
                 .sorted((a, b) -> ascending
                         ? a.getCreatedDate().compareTo(b.getCreatedDate())
                         : b.getCreatedDate().compareTo(a.getCreatedDate()))
@@ -120,16 +122,29 @@ public class InMemoryUrlMappingRepository extends UrlMappingDynamoRepository {
     }
 
     @Override
-    public long countByOwnerId(Long ownerId) {
-        return countByOwnerId(ownerId, null);
-    }
-
-    @Override
-    public long countByOwnerId(Long ownerId, String createdAfter) {
+    public long countByOwnerId(Long ownerId, String createdAfter, String notExpiredAt) {
         return store.values().stream()
                 .filter(i -> ownerId.equals(i.getOwnerId()))
                 .filter(i -> createdAfter == null || i.getCreatedDate().compareTo(createdAfter) > 0)
+                .filter(i -> notExpired(i, notExpiredAt))
                 .count();
+    }
+
+    private static boolean notExpired(UrlMappingItem item, String at) {
+        return at == null || item.getExpiresAt() == null || item.getExpiresAt().compareTo(at) > 0;
+    }
+
+    @Override
+    public void setExpiresAt(String shortUrl, String expiresAt) {
+        store.computeIfPresent(shortUrl, (k, v) -> {
+            v.setExpiresAt(expiresAt);
+            return v;
+        });
+    }
+
+    @Override
+    public void forEach(java.util.function.Consumer<UrlMappingItem> action) {
+        List.copyOf(store.values()).forEach(action);
     }
 
     @Override

@@ -36,17 +36,17 @@ public interface AnalyticsStorage {
     List<ClickEventDetailDto> findByShortUrlAndDateBetween(String shortUrl, LocalDateTime start, LocalDateTime end);
 
     /**
-     * Counts click events for a specific URL within a date range.
+     * Counts clicks for a specific URL on the days the range touches.
      */
     long countByShortUrlAndDateBetween(String shortUrl, LocalDateTime start, LocalDateTime end);
 
     /**
-     * Returns click event counts grouped by date for a specific URL.
+     * Returns click counts per day for a specific URL.
      */
     List<ClickEventDto> findAggregatedByShortUrlAndDateBetween(String shortUrl, LocalDateTime start, LocalDateTime end);
 
     /**
-     * Returns click event counts grouped by date for multiple URLs.
+     * Returns click counts per day, summed over multiple URLs.
      */
     List<ClickEventDto> findAggregatedByShortUrlsAndDateBetween(List<String> shortUrls, LocalDateTime start, LocalDateTime end);
 
@@ -62,9 +62,17 @@ public interface AnalyticsStorage {
     long countByShortUrlsAndDateBetween(List<String> shortUrls, LocalDateTime start, LocalDateTime end);
 
     /**
-     * Deletes all click events for a specific URL.
+     * Deletes all click data for a specific URL: events and daily totals.
      */
     void deleteByShortUrl(String shortUrl);
+
+    /**
+     * Deletes a URL's individual click events from before cutoff, keeping its
+     * daily totals.
+     *
+     * @return how many events were deleted
+     */
+    long deleteClickDetailsBefore(String shortUrl, LocalDateTime cutoff);
 
     /**
      * Counts total click events for a specific URL (all time).

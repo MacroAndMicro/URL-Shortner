@@ -355,17 +355,27 @@ public class UrlMappingDynamoRepository {
      * @param lastEvaluatedKey  Token from previous page (null for first page)
      * @param ascending         true = oldest first, false = newest first
      * @param createdAfter      only items created after this ISO date-time; null for all
+     * @param notExpiredAt      leave out items whose stored expiresAt is at or before
+     *                          this ISO date-time; null to keep all. DynamoDB applies
+     *                          it after reading pageSize items, so a page can be short.
      * @return DynamoPageResult containing items and the next page token
      */
     public DynamoPageResult<UrlMappingItem> findByOwnerIdPaginated(Long ownerId, int pageSize,
                                                                     Map<String, String> lastEvaluatedKey,
                                                                     boolean ascending,
-                                                                    String createdAfter) {
+                                                                    String createdAfter,
+                                                                    String notExpiredAt) {
         var iterable = urlMappingTable.index("ownerId-index")
                 .query(r -> {
                     r.queryConditional(ownerCondition(ownerId, createdAfter))
                             .limit(pageSize)
                             .scanIndexForward(ascending);
+                    if (notExpiredAt != null) {
+                        r.filterExpression(Expression.builder()
+                                .expression("attribute_not_exists(expiresAt) OR expiresAt > :now")
+                                .putExpressionValue(":now", AttributeValue.builder().s(notExpiredAt).build())
+                                .build());
+                    }
                     if (lastEvaluatedKey != null && !lastEvaluatedKey.isEmpty()) {
                         r.exclusiveStartKey(toExclusiveStartKey(ownerId, lastEvaluatedKey));
                     }
@@ -480,23 +490,22 @@ public class UrlMappingDynamoRepository {
     // ============================================================
 
     /**
-     * Counts the number of URL mappings belonging to a user.
-     */
-    public long countByOwnerId(Long ownerId) {
-        return countByOwnerId(ownerId, null);
-    }
-
-    /**
-     * Counts a user's mappings created after createdAfter (all when null).
+     * Counts a user's mappings created after createdAfter (all when null)
+     * whose stored expiresAt is after notExpiredAt (no filter when null).
      * Asks DynamoDB for the count only, so no items are transferred.
      */
-    public long countByOwnerId(Long ownerId, String createdAfter) {
+    public long countByOwnerId(Long ownerId, String createdAfter, String notExpiredAt) {
         Map<String, AttributeValue> values = new HashMap<>();
         values.put(":owner", AttributeValue.builder().n(ownerId.toString()).build());
         String keyCondition = "ownerId = :owner";
         if (createdAfter != null) {
             values.put(":after", AttributeValue.builder().s(createdAfter).build());
             keyCondition += " AND createdDate > :after";
+        }
+        String filter = null;
+        if (notExpiredAt != null) {
+            values.put(":now", AttributeValue.builder().s(notExpiredAt).build());
+            filter = "attribute_not_exists(expiresAt) OR expiresAt > :now";
         }
 
         long total = 0;
@@ -506,6 +515,7 @@ public class UrlMappingDynamoRepository {
                     .tableName(tableName)
                     .indexName("ownerId-index")
                     .keyConditionExpression(keyCondition)
+                    .filterExpression(filter)
                     .expressionAttributeValues(values)
                     .select(Select.COUNT)
                     .exclusiveStartKey(startKey)
@@ -565,6 +575,36 @@ public class UrlMappingDynamoRepository {
      *
      * @return true if updated, false if the mapping no longer exists
      */
+    /**
+     * Sets or (with null) removes a link's stored expiry, leaving everything
+     * else untouched. Does nothing if the link no longer exists.
+     */
+    public void setExpiresAt(String shortUrl, String expiresAt) {
+        UpdateItemRequest.Builder request = UpdateItemRequest.builder()
+                .tableName(tableName)
+                .key(Map.of("shortUrl", AttributeValue.builder().s(shortUrl).build()))
+                .conditionExpression("attribute_exists(shortUrl)");
+        if (expiresAt != null) {
+            request.updateExpression("SET expiresAt = :e")
+                    .expressionAttributeValues(Map.of(":e", AttributeValue.builder().s(expiresAt).build()));
+        } else {
+            request.updateExpression("REMOVE expiresAt");
+        }
+        try {
+            dynamoDbClient.updateItem(request.build());
+        } catch (ConditionalCheckFailedException e) {
+            // Deleted meanwhile.
+        }
+    }
+
+    /**
+     * Visits every mapping in the table, a page at a time. For the daily
+     * cleanup job; reads the whole table, so it is not for request paths.
+     */
+    public void forEach(java.util.function.Consumer<UrlMappingItem> action) {
+        urlMappingTable.scan().items().forEach(action);
+    }
+
     public boolean updateOriginalUrl(String shortUrl, String originalUrl, String ownerUrlKey,
                                      String updatedDate) {
         try {

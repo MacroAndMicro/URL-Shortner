@@ -14,7 +14,6 @@ import java.time.ZoneId;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
@@ -41,7 +40,6 @@ class PlanServiceTest {
                 Clock.fixed(NOW.atZone(ZONE).toInstant(), ZONE));
         user = new User();
         user.setId(7L);
-        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
     private void subscribe(Plan plan, LocalDateTime periodEnd) {
@@ -49,11 +47,16 @@ class PlanServiceTest {
         user.setPlanPeriodEnd(periodEnd);
     }
 
+    // ============================================================
+    // EFFECTIVE PLAN AND GRACE PERIOD
+    // ============================================================
+
     @Test
     void newUsersAreFree() {
         assertThat(planService.effectivePlan(user)).isEqualTo(Plan.FREE);
         assertThat(planService.inGracePeriod(user)).isFalse();
         assertThat(planService.graceEndsAt(user)).isNull();
+        assertThat(planService.status(user).lapsedAt()).isNull();
     }
 
     @Test
@@ -77,13 +80,31 @@ class PlanServiceTest {
     void userFallsBackToFreeWhenTheGracePeriodEnds() {
         subscribe(Plan.MONTHLY, NOW.minusDays(7));
 
-        assertThat(planService.effectivePlan(user)).isEqualTo(Plan.FREE);
-        assertThat(planService.inGracePeriod(user)).isFalse();
+        OwnerStatus status = planService.status(user);
+        assertThat(status.effective()).isEqualTo(Plan.FREE);
+        assertThat(status.subscribed()).isEqualTo(Plan.MONTHLY);
+        assertThat(status.lapsedAt()).isEqualTo(NOW);
     }
 
     @Test
+    void periodStartIsOneMonthOrOneYearBeforeThePeriodEnd() {
+        subscribe(Plan.MONTHLY, NOW.plusDays(10));
+        assertThat(planService.periodStart(planService.status(user))).isEqualTo(NOW.plusDays(10).minusMonths(1));
+
+        subscribe(Plan.YEARLY, NOW.plusDays(10));
+        assertThat(planService.periodStart(planService.status(user))).isEqualTo(NOW.plusDays(10).minusYears(1));
+
+        subscribe(Plan.FREE, null);
+        assertThat(planService.periodStart(planService.status(user))).isNull();
+    }
+
+    // ============================================================
+    // OWNER LOOKUP FOR REDIRECTS
+    // ============================================================
+
+    @Test
     void ownerlessLinksAreGuestLinks() {
-        assertThat(planService.effectivePlanForOwner(null)).isEqualTo(Plan.GUEST);
+        assertThat(planService.ownerStatus(null)).isEqualTo(OwnerStatus.GUEST);
         verifyNoInteractions(userRepository);
     }
 
@@ -92,7 +113,7 @@ class PlanServiceTest {
         subscribe(Plan.MONTHLY, NOW.plusDays(3));
         when(userRepository.findById(7L)).thenReturn(Optional.of(user));
 
-        assertThat(planService.effectivePlanForOwner(7L)).isEqualTo(Plan.MONTHLY);
+        assertThat(planService.ownerStatus(7L).effective()).isEqualTo(Plan.MONTHLY);
         verify(values).set(eq("plan:7"), eq("MONTHLY|2026-11-24T12:00:00"), any(Duration.class));
     }
 
@@ -101,7 +122,9 @@ class PlanServiceTest {
         when(values.get("plan:7")).thenReturn("YEARLY|2026-11-01T00:00:00");
 
         // Period ended 20 days ago: grace is over, so FREE despite the cached YEARLY.
-        assertThat(planService.effectivePlanForOwner(7L)).isEqualTo(Plan.FREE);
+        OwnerStatus status = planService.ownerStatus(7L);
+        assertThat(status.effective()).isEqualTo(Plan.FREE);
+        assertThat(status.lapsedAt()).isEqualTo(LocalDateTime.of(2026, 11, 8, 0, 0));
         verifyNoInteractions(userRepository);
     }
 
@@ -110,44 +133,73 @@ class PlanServiceTest {
         when(values.get(anyString())).thenThrow(new RuntimeException("redis down"));
         when(userRepository.findById(7L)).thenReturn(Optional.of(user));
 
-        assertThat(planService.effectivePlanForOwner(7L)).isEqualTo(Plan.FREE);
+        assertThat(planService.ownerStatus(7L).effective()).isEqualTo(Plan.FREE);
+    }
+
+    // ============================================================
+    // LINK EXPIRY
+    // ============================================================
+
+    @Test
+    void storedExpiryAlwaysWins() {
+        LocalDateTime stored = NOW.minusDays(1);
+        OwnerStatus yearly = new OwnerStatus(Plan.YEARLY, Plan.YEARLY, NOW.plusYears(1));
+
+        assertThat(planService.linkExpiresAt(NOW.minusDays(9), stored, yearly)).isEqualTo(stored);
     }
 
     @Test
-    void changingTheSubscriptionEvictsTheCachedOwnerPlan() {
-        planService.changeSubscription(user, Plan.YEARLY, NOW.plusYears(1));
+    void paidLinksWithoutStoredExpiryNeverExpire() {
+        OwnerStatus monthly = new OwnerStatus(Plan.MONTHLY, Plan.MONTHLY, NOW.plusDays(10));
 
-        assertThat(user.getPlan()).isEqualTo(Plan.YEARLY);
-        verify(redis).delete("plan:7");
+        assertThat(planService.linkExpiresAt(NOW.minusYears(3), null, monthly)).isNull();
     }
 
     @Test
-    void downgradingToFreeClearsThePeriodEnd() {
-        subscribe(Plan.MONTHLY, NOW.plusDays(3));
+    void afterALapseOldLinksGetFiveDaysFromTheLapse() {
+        // Grace ended 2 days ago.
+        OwnerStatus lapsed = new OwnerStatus(Plan.FREE, Plan.MONTHLY, NOW.minusDays(9));
+        LocalDateTime lapsedAt = NOW.minusDays(2);
 
-        planService.changeSubscription(user, Plan.FREE, NOW.plusDays(3));
-
-        assertThat(user.getPlanPeriodEnd()).isNull();
+        assertThat(planService.linkExpiresAt(NOW.minusYears(1), null, lapsed)).isEqualTo(lapsedAt.plusDays(5));
+        // A link made after the lapse counts from its own creation.
+        assertThat(planService.linkExpiresAt(NOW.minusDays(1), null, lapsed)).isEqualTo(NOW.plusDays(4));
     }
 
     @Test
-    void invalidSubscriptionsAreRejected() {
-        assertThatThrownBy(() -> planService.changeSubscription(user, Plan.GUEST, null))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> planService.changeSubscription(user, Plan.MONTHLY, null))
-                .isInstanceOf(IllegalArgumentException.class);
+    void linksMadeBeforeExpiryWasStoredCountFromCreation() {
+        OwnerStatus free = new OwnerStatus(Plan.FREE, Plan.FREE, null);
+
+        assertThat(planService.linkExpiresAt(NOW.minusDays(1), null, free)).isEqualTo(NOW.plusDays(4));
+        assertThat(planService.linkExpiresAt(NOW.minusDays(1), null, OwnerStatus.GUEST)).isEqualTo(NOW.plusDays(4));
     }
 
     @Test
-    void linkExpiryFollowsThePlan() {
-        LocalDateTime created = NOW.minusDays(4);
+    void expiredLinkDataIsKeptThirtyDaysFromTheStartOfItsCountdown() {
+        LocalDateTime expiresAt = NOW.plusDays(5);
 
-        assertThat(planService.linkExpiresAt(created, Plan.FREE)).isEqualTo(created.plusDays(5));
-        assertThat(planService.isLinkActive(created, Plan.FREE)).isTrue();
-        assertThat(planService.isLinkActive(NOW.minusDays(5), Plan.FREE)).isFalse();
-        assertThat(planService.linkExpiresAt(created, Plan.YEARLY)).isNull();
-        assertThat(planService.isLinkActive(NOW.minusYears(3), Plan.YEARLY)).isTrue();
-        assertThat(planService.activeLinksCreatedAfter(Plan.FREE)).isEqualTo(NOW.minusDays(5));
-        assertThat(planService.activeLinksCreatedAfter(Plan.MONTHLY)).isNull();
+        assertThat(planService.dataDeletedAt(expiresAt)).isEqualTo(NOW.plusDays(30));
+        assertThat(planService.dataDeletedAt(null)).isNull();
+    }
+
+    @Test
+    void newLinkExpiryFollowsThePlan() {
+        assertThat(planService.newLinkExpiresAt(Plan.FREE)).isEqualTo(NOW.plusDays(5));
+        assertThat(planService.newLinkExpiresAt(Plan.GUEST)).isEqualTo(NOW.plusDays(5));
+        assertThat(planService.newLinkExpiresAt(Plan.YEARLY)).isNull();
+    }
+
+    @Test
+    void workingLinksQueryWindowCoversALapsedUsersOldLinks() {
+        assertThat(planService.activeLinksCreatedAfter(new OwnerStatus(Plan.FREE, Plan.FREE, null)))
+                .isEqualTo(NOW.minusDays(5));
+        assertThat(planService.activeLinksCreatedAfter(new OwnerStatus(Plan.MONTHLY, Plan.MONTHLY, NOW.plusDays(1))))
+                .isNull();
+        // Lapsed 2 days ago: older links still work, so no window.
+        assertThat(planService.activeLinksCreatedAfter(new OwnerStatus(Plan.FREE, Plan.MONTHLY, NOW.minusDays(9))))
+                .isNull();
+        // Lapsed 6 days ago: they have all expired.
+        assertThat(planService.activeLinksCreatedAfter(new OwnerStatus(Plan.FREE, Plan.MONTHLY, NOW.minusDays(13))))
+                .isEqualTo(NOW.minusDays(5));
     }
 }

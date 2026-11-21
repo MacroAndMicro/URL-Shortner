@@ -33,7 +33,8 @@ public class ClickEventDocument {
     @Field("short_url")
     private String shortUrl;
 
-    @Indexed(name = "click_date_ttl", expireAfter = "400d")
+    // Trimmed per plan by LinkCleanupJob; no TTL index, which would cut every plan at
+    // the same age.
     private LocalDateTime clickDate;
     private String ipAddress;
     private String referrer;

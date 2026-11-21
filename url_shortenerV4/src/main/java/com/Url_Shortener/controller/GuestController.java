@@ -35,7 +35,7 @@ public class GuestController {
             @RequestHeader(value = GUEST_ID_HEADER, required = false) String guestId,
             HttpServletRequest httpRequest) {
         UrlMappingDto dto = urlMappingService.createGuestShortUrl(
-                request.getOriginalUrl(), guestId, httpRequest.getRemoteAddr());
+                request.getOriginalUrl(), request.getCustomCode(), guestId, httpRequest.getRemoteAddr());
         return ResponseEntity.ok(ApiResponse.success(dto, "Short URL created successfully"));
     }
 }
