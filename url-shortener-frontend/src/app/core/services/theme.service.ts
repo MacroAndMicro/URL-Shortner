@@ -1,15 +1,20 @@
 import { Injectable, signal, effect } from '@angular/core';
 
+const THEME_KEY = 'theme';
+
+/** Light or dark theme: the saved choice, else the system setting. */
 @Injectable({ providedIn: 'root' })
 export class ThemeService {
-  readonly theme = signal<'light' | 'dark'>(
-    (localStorage.getItem('theme') as 'light' | 'dark') ?? this.getSystemPreference()
-  );
+  readonly theme = signal<'light' | 'dark'>(this.saved() ?? this.getSystemPreference());
 
   constructor() {
     effect(() => {
       const t = this.theme();
-      localStorage.setItem('theme', t);
+      try {
+        localStorage.setItem(THEME_KEY, t);
+      } catch {
+        // Storage blocked: the choice lasts for this page only.
+      }
       document.documentElement.classList.toggle('dark', t === 'dark');
     });
   }
@@ -20,6 +25,15 @@ export class ThemeService {
 
   isDark(): boolean {
     return this.theme() === 'dark';
+  }
+
+  private saved(): 'light' | 'dark' | null {
+    try {
+      const value = localStorage.getItem(THEME_KEY);
+      return value === 'light' || value === 'dark' ? value : null;
+    } catch {
+      return null;
+    }
   }
 
   private getSystemPreference(): 'light' | 'dark' {
