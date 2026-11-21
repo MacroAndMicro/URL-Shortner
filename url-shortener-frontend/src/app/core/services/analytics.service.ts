@@ -35,11 +35,13 @@ export class AnalyticsService {
     return this.http.get<ApiResponse<UrlMapping[]>>(`${this.baseUrl}/top`, { params });
   }
 
+  /** Clicks per day for one link; dates are yyyy-MM-ddTHH:mm:ss. */
   getAnalytics(shortUrl: string, startDate: string, endDate: string): Observable<ApiResponse<DailyClickCount[]>> {
     const params = new HttpParams()
+      .set('shortUrl', shortUrl)
       .set('startDate', startDate)
       .set('endDate', endDate);
-    return this.http.get<ApiResponse<DailyClickCount[]>>(`${this.baseUrl}/analytics/${shortUrl}`, { params });
+    return this.http.get<ApiResponse<DailyClickCount[]>>(`${this.baseUrl}/analytics`, { params });
   }
 
   getClickDetails(shortUrl: string, startDate: string, endDate: string): Observable<ApiResponse<ClickEventDetail[]>> {

@@ -1,5 +1,6 @@
-import { Component, inject, OnInit, signal, AfterViewInit, viewChild, ElementRef } from '@angular/core';
-import { ActivatedRoute } from '@angular/router';
+import { Component, inject, OnInit, OnDestroy, signal, viewChild, ElementRef } from '@angular/core';
+import { forkJoin } from 'rxjs';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { SlicePipe } from '@angular/common';
 import { Chart, registerables } from 'chart.js';
@@ -13,7 +14,7 @@ Chart.register(...registerables);
 @Component({
   selector: 'app-analytics-page',
   standalone: true,
-  imports: [FormsModule, SlicePipe, StatCardComponent, SkeletonComponent],
+  imports: [RouterLink, FormsModule, SlicePipe, StatCardComponent, SkeletonComponent],
   template: `
     <div class="section py-8">
       <h1 class="text-h2 mb-1 text-navy-900 dark:text-white">Link Analytics</h1>
@@ -45,7 +46,12 @@ Chart.register(...registerables);
         </div>
       </div>
 
-      @if (loading()) {
+      @if (error()) {
+        <div class="card-elevated text-center py-12">
+          <p class="text-navy-900 dark:text-white mb-4">{{ error() }}</p>
+          <a routerLink="/plan" class="btn-accent inline-block">View plans</a>
+        </div>
+      } @else if (loading()) {
         <div class="space-y-6">
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             @for (i of [1,2,3,4]; track i) { <div class="card rounded-2xl"><app-skeleton height="70px" /></div> }
@@ -108,7 +114,7 @@ Chart.register(...registerables);
     </div>
   `,
 })
-export class AnalyticsPageComponent implements OnInit, AfterViewInit {
+export class AnalyticsPageComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly analyticsService = inject(AnalyticsService);
 
@@ -123,6 +129,7 @@ export class AnalyticsPageComponent implements OnInit, AfterViewInit {
   activePreset = signal(7);
   clicks = signal<DailyClickCount[]>([]);
   details = signal<ClickEventDetail[]>([]);
+  error = signal<string | null>(null);
 
   presets = [
     { label: '7 days', days: 7 }, { label: '30 days', days: 30 }, { label: '90 days', days: 90 }, { label: 'All time', days: 365 },
@@ -136,7 +143,7 @@ export class AnalyticsPageComponent implements OnInit, AfterViewInit {
     this.applyPreset(7);
   }
 
-  ngAfterViewInit(): void { setTimeout(() => this.buildCharts(), 1000); }
+  ngOnDestroy(): void { this.destroyCharts(); }
 
   applyPreset(days: number): void {
     this.activePreset.set(days);
@@ -151,28 +158,45 @@ export class AnalyticsPageComponent implements OnInit, AfterViewInit {
     const start = `${this.startDate}T00:00:00`;
     const end = `${this.endDate}T23:59:59`;
     this.loading.set(true);
+    this.error.set(null);
 
-    this.analyticsService.getAnalytics(this.shortUrl(), start, end).subscribe({
-      next: (res) => { this.clicks.set(res.data); },
-    });
-    this.analyticsService.getClickDetails(this.shortUrl(), start, end).subscribe({
-      next: (res) => {
-        this.details.set(res.data);
+    // Both requests must finish before the charts are drawn.
+    forkJoin({
+      clicks: this.analyticsService.getAnalytics(this.shortUrl(), start, end),
+      details: this.analyticsService.getClickDetails(this.shortUrl(), start, end),
+    }).subscribe({
+      next: ({ clicks, details }) => {
+        this.clicks.set(clicks.data);
+        this.details.set(details.data);
         this.loading.set(false);
-        setTimeout(() => this.buildCharts(), 300);
+        setTimeout(() => this.buildCharts());
       },
-      error: () => { this.loading.set(false); },
+      error: (err) => {
+        // e.g. 403 on plans without analytics; the backend explains why.
+        this.error.set(err.error?.message ?? 'Could not load analytics for this link.');
+        this.loading.set(false);
+      },
     });
+  }
+
+  /** Click counts per referring site, largest first; no referrer counts as Direct. */
+  private referrerCounts(): [string, number][] {
+    return countBy(this.details().map((d) => {
+      if (!d.referrer) return 'Direct';
+      try { return new URL(d.referrer).hostname; } catch { return d.referrer.slice(0, 30); }
+    }));
+  }
+
+  /** Click counts per browser, worked out from the User-Agent; largest first. */
+  private browserCounts(): [string, number][] {
+    return countBy(this.details().map((d) => browserName(d.userAgent)));
   }
 
   totalClicks(): number { return this.clicks().reduce((s, c) => s + c.count, 0); }
   uniqueIPs(): number { return new Set(this.details().map(d => d.ipAddress).filter(Boolean)).size; }
   avgDaily(): number { const c = this.clicks(); return c.length ? Math.round(this.totalClicks() / c.length) : 0; }
   topReferrer(): string {
-    const refs = this.details().map(d => d.referrer).filter(Boolean) as string[];
-    if (!refs.length) return 'Direct';
-    const top = refs.reduce((a, b) => refs.filter(r => r === a).length >= refs.filter(r => r === b).length ? a : b);
-    try { return new URL(top).hostname; } catch { return top.slice(0, 30); }
+    return this.referrerCounts()[0]?.[0] ?? '—';
   }
 
   private buildCharts(): void {
@@ -197,11 +221,12 @@ export class AnalyticsPageComponent implements OnInit, AfterViewInit {
 
     // Doughnut
     const dc = this.doughnutChartRef()?.nativeElement;
-    if (dc) {
+    const referrers = topWithOther(this.referrerCounts(), 4);
+    if (dc && referrers.length) {
       this.chartInstances.push(new Chart(dc, {
         type: 'doughnut', data: {
-          labels: ['Direct', 'Google', 'Twitter', 'Other'],
-          datasets: [{ data: [45, 25, 15, 15], backgroundColor: ['#EE6123', '#2D4A7A', '#10B981', '#8B5CF6'], borderWidth: 0 }],
+          labels: referrers.map(([name]) => name),
+          datasets: [{ data: referrers.map(([, n]) => n), backgroundColor: ['#EE6123', '#2D4A7A', '#10B981', '#8B5CF6'], borderWidth: 0 }],
         },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: textColor, padding: 16 } } } },
       }));
@@ -209,11 +234,12 @@ export class AnalyticsPageComponent implements OnInit, AfterViewInit {
 
     // Horizontal bar
     const bc = this.barChartRef()?.nativeElement;
-    if (bc) {
+    const browsers = topWithOther(this.browserCounts(), 4);
+    if (bc && browsers.length) {
       this.chartInstances.push(new Chart(bc, {
         type: 'bar', data: {
-          labels: ['Chrome', 'Safari', 'Firefox', 'Edge'],
-          datasets: [{ data: [55, 22, 13, 10], backgroundColor: ['#2D4A7A', '#EE6123', '#10B981', '#8B5CF6'], borderRadius: 6 }],
+          labels: browsers.map(([name]) => name),
+          datasets: [{ data: browsers.map(([, n]) => n), backgroundColor: ['#2D4A7A', '#EE6123', '#10B981', '#8B5CF6'], borderRadius: 6 }],
         },
         options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { color: gridColor }, ticks: { color: textColor } }, y: { grid: { display: false }, ticks: { color: textColor } } } },
       }));
@@ -221,5 +247,30 @@ export class AnalyticsPageComponent implements OnInit, AfterViewInit {
   }
 
   private destroyCharts(): void { this.chartInstances.forEach(c => c.destroy()); this.chartInstances = []; }
+}
+
+/** Occurrences of each value, largest first. */
+function countBy(values: string[]): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+/** Keeps the first max - 1 entries and folds the rest into "Other". */
+function topWithOther(sorted: [string, number][], max: number): [string, number][] {
+  if (sorted.length <= max) return sorted;
+  const rest = sorted.slice(max - 1).reduce((sum, [, n]) => sum + n, 0);
+  return [...sorted.slice(0, max - 1), ['Other', rest]];
+}
+
+/** Browser family from a User-Agent. Order matters: Edge and Opera also say "Chrome", Chrome also says "Safari". */
+function browserName(userAgent: string | null): string {
+  if (!userAgent) return 'Unknown';
+  if (/Edg\//.test(userAgent)) return 'Edge';
+  if (/OPR\/|Opera/.test(userAgent)) return 'Opera';
+  if (/Firefox\//.test(userAgent)) return 'Firefox';
+  if (/Chrome\/|CriOS\//.test(userAgent)) return 'Chrome';
+  if (/Safari\//.test(userAgent)) return 'Safari';
+  return 'Other';
 }
 
