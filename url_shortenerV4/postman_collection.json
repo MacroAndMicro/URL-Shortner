@@ -1,45 +1,90 @@
 {
   "info": {
-    "name": "URL Shortener V4 - Polyglot Persistence Migration Tests",
-    "description": "Complete API test suite for validating the DynamoDB migration. All 17 endpoints covered.",
+    "name": "URL Shortener V4",
+    "description": "Runs the API end to end against a local backend: auth, links, redirects, plans, guests and analytics.\n\nRequires the backend to run with DEV_PLAN_SWITCH_ENABLED=true, because the plan requests switch\nthe test user between plans without payment. Each run registers a new user and guest ID, so it can\nbe run repeatedly. Run in order: later requests use IDs and tokens saved by earlier ones.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    {"key": "baseUrl", "value": "http://localhost:8080"},
-    {"key": "jwtToken", "value": ""},
-    {"key": "refreshToken", "value": ""},
-    {"key": "shortUrl", "value": ""},
-    {"key": "urlId", "value": ""},
-    {"key": "testUsername", "value": "testuser_dynamodb"},
-    {"key": "testEmail", "value": "testuser_dynamodb@example.com"},
-    {"key": "testPassword", "value": "TestPass123!"}
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "testPassword",
+      "value": "TestPass123!"
+    },
+    {
+      "key": "testUsername",
+      "value": ""
+    },
+    {
+      "key": "jwtToken",
+      "value": ""
+    },
+    {
+      "key": "refreshToken",
+      "value": ""
+    },
+    {
+      "key": "shortUrl",
+      "value": ""
+    },
+    {
+      "key": "urlId",
+      "value": ""
+    },
+    {
+      "key": "guestId",
+      "value": ""
+    },
+    {
+      "key": "guestShortUrl",
+      "value": ""
+    },
+    {
+      "key": "periodEnd",
+      "value": ""
+    },
+    {
+      "key": "rangeStart",
+      "value": ""
+    },
+    {
+      "key": "rangeEnd",
+      "value": ""
+    }
   ],
   "item": [
     {
-      "name": "1. Health Check",
+      "name": "1. Health",
       "item": [
         {
-          "name": "GET Health",
+          "name": "Health",
           "event": [
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Response has success message', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.status).to.eql(200);",
-                  "  pm.expect(json.message).to.include('up');",
-                  "});"
-                ],
-                "type": "text/javascript"
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
               }
             }
           ],
           "request": {
             "method": "GET",
             "header": [],
-            "url": {"raw": "{{baseUrl}}/api/v1/health", "host": ["{{baseUrl}}"], "path": ["api", "v1", "health"]}
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health"
+              ]
+            }
           }
         }
       ]
@@ -48,538 +93,1496 @@
       "name": "2. Authentication",
       "item": [
         {
-          "name": "POST Register",
+          "name": "Register",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A new user per run, so the collection can be run repeatedly.",
+                  "pm.collectionVariables.set('testUsername', 'pm_' + Date.now().toString(36));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/public/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "public",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{testUsername}}\",\n  \"email\": \"{{testUsername}}@example.com\",\n  \"password\": \"{{testPassword}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Register again (expect 409)",
           "event": [
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/public/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "public",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{testUsername}}\",\n  \"email\": \"{{testUsername}}@example.com\",\n  \"password\": \"{{testPassword}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
                 "exec": [
                   "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Registration success message', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.status).to.eql(200);",
-                  "  pm.expect(json.message).to.include('registered');",
+                  "pm.test('Returns tokens', () => {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.expect(data.token).to.be.a('string');",
+                  "  pm.expect(data.refreshToken).to.be.a('string');",
+                  "  pm.collectionVariables.set('jwtToken', data.token);",
+                  "  pm.collectionVariables.set('refreshToken', data.refreshToken);",
                   "});"
-                ],
-                "type": "text/javascript"
+                ]
               }
             }
           ],
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
-            "body": {
-              "mode": "raw",
-              "raw": "{\"username\":\"{{testUsername}}\",\"email\":\"{{testEmail}}\",\"password\":\"{{testPassword}}\"}"
-            },
-            "url": {"raw": "{{baseUrl}}/api/v1/auth/public/register", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "public", "register"]}
-          }
-        },
-        {
-          "name": "POST Register - Duplicate (expect 409)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test('Status is 409 Conflict', () => pm.response.to.have.status(409));"
-                ],
-                "type": "text/javascript"
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
               }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/public/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "public",
+                "login"
+              ]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\"username\":\"{{testUsername}}\",\"email\":\"{{testEmail}}\",\"password\":\"{{testPassword}}\"}"
-            },
-            "url": {"raw": "{{baseUrl}}/api/v1/auth/public/register", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "public", "register"]}
+              "raw": "{\n  \"username\": \"{{testUsername}}\",\n  \"password\": \"{{testPassword}}\"\n}"
+            }
           }
         },
         {
-          "name": "POST Login",
+          "name": "Login with wrong password (expect 401)",
           "event": [
             {
               "listen": "test",
               "script": {
-                "exec": [
-                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Response contains token and refreshToken', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.data.token).to.be.a('string');",
-                  "  pm.expect(json.data.refreshToken).to.be.a('string');",
-                  "  pm.environment.set('jwtToken', json.data.token);",
-                  "  pm.environment.set('refreshToken', json.data.refreshToken);",
-                  "});"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
-            "body": {
-              "mode": "raw",
-              "raw": "{\"username\":\"{{testUsername}}\",\"password\":\"{{testPassword}}\"}"
-            },
-            "url": {"raw": "{{baseUrl}}/api/v1/auth/public/login", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "public", "login"]}
-          }
-        },
-        {
-          "name": "POST Login - Bad Credentials (expect 401)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
+                "type": "text/javascript",
                 "exec": [
                   "pm.test('Status is 401', () => pm.response.to.have.status(401));"
-                ],
-                "type": "text/javascript"
+                ]
               }
             }
           ],
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/public/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "public",
+                "login"
+              ]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\"username\":\"{{testUsername}}\",\"password\":\"WrongPassword123!\"}"
-            },
-            "url": {"raw": "{{baseUrl}}/api/v1/auth/public/login", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "public", "login"]}
+              "raw": "{\n  \"username\": \"{{testUsername}}\",\n  \"password\": \"wrong-password\"\n}"
+            }
           }
         },
         {
-          "name": "GET Me (Profile)",
+          "name": "Me",
           "event": [
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
                   "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Profile has correct username', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.data.username).to.eql(pm.environment.get('testUsername'));",
-                  "  pm.expect(json.data.email).to.eql(pm.environment.get('testEmail'));",
-                  "  pm.expect(json.data.roles).to.include('ROLE_USER');",
-                  "});"
-                ],
-                "type": "text/javascript"
+                  "pm.test('Is the test user', () => pm.expect(pm.response.json().data.username).to.eql(pm.collectionVariables.get('testUsername')));"
+                ]
               }
             }
           ],
           "request": {
             "method": "GET",
-            "header": [{"key": "Authorization", "value": "Bearer {{jwtToken}}"}],
-            "url": {"raw": "{{baseUrl}}/api/v1/auth/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "me"]}
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "me"
+              ]
+            }
           }
         },
         {
-          "name": "POST Refresh Token",
+          "name": "Refresh token",
           "event": [
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
                   "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('New tokens returned', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.data.token).to.be.a('string');",
-                  "  pm.expect(json.data.refreshToken).to.be.a('string');",
-                  "  pm.environment.set('jwtToken', json.data.token);",
-                  "  pm.environment.set('refreshToken', json.data.refreshToken);",
+                  "pm.test('Rotates both tokens', () => {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('jwtToken', data.token);",
+                  "  pm.collectionVariables.set('refreshToken', data.refreshToken);",
                   "});"
-                ],
-                "type": "text/javascript"
+                ]
               }
             }
           ],
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/public/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "public",
+                "refresh"
+              ]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\"refreshToken\":\"{{refreshToken}}\"}"
-            },
-            "url": {"raw": "{{baseUrl}}/api/v1/auth/public/refresh", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "public", "refresh"]}
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            }
           }
         }
       ]
     },
     {
-      "name": "3. URL Shortening (CRUD)",
+      "name": "3. Free plan",
+      "description": "A new user is on the Free plan: 50 active links that last 5 days, 301 redirects, no analytics.",
       "item": [
         {
-          "name": "POST Create Short URL",
+          "name": "Plan is Free",
           "event": [
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
                   "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('URL created with all fields', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.data.shortUrl).to.be.a('string').with.lengthOf(8);",
-                  "  pm.expect(json.data.originalUrl).to.eql('https://example.com/test-page');",
-                  "  pm.expect(json.data.clickCount).to.eql(0);",
-                  "  pm.expect(json.data.username).to.eql(pm.environment.get('testUsername'));",
-                  "  pm.expect(json.data.id).to.be.a('number');",
-                  "  pm.environment.set('shortUrl', json.data.shortUrl);",
-                  "  pm.environment.set('urlId', json.data.id);",
+                  "pm.test('Free plan rules', () => {",
+                  "  const p = pm.response.json().data;",
+                  "  pm.expect(p.effectivePlan).to.eql('FREE');",
+                  "  pm.expect(p.maxActiveUrls).to.eql(50);",
+                  "  pm.expect(p.linkLifetimeDays).to.eql(5);",
+                  "  pm.expect(p.analytics).to.eql(false);",
+                  "  pm.expect(p.redirectStatus).to.eql(301);",
+                  "  pm.expect(p.devPlanSwitchEnabled, 'start the backend with DEV_PLAN_SWITCH_ENABLED=true').to.eql(true);",
                   "});"
-                ],
-                "type": "text/javascript"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/account/plan",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "account",
+                "plan"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create short URL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Snowflake base62 code that expires in 5 days', () => {",
+                  "  const d = pm.response.json().data;",
+                  "  pm.expect(d.shortUrl).to.match(/^[0-9A-Za-z]{10,11}$/);",
+                  "  pm.expect(d.id).to.be.a('string');",
+                  "  const days = (new Date(d.expiresAt) - new Date(d.createdDate)) / 86400000;",
+                  "  pm.expect(days).to.be.closeTo(5, 0.001);",
+                  "  pm.collectionVariables.set('shortUrl', d.shortUrl);",
+                  "  pm.collectionVariables.set('urlId', d.id);",
+                  "});"
+                ]
               }
             }
           ],
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Authorization", "value": "Bearer {{jwtToken}}"}
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/shorten",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "shorten"
+              ]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\"originalUrl\":\"https://example.com/test-page\"}"
-            },
-            "url": {"raw": "{{baseUrl}}/api/v1/urls/shorten", "host": ["{{baseUrl}}"], "path": ["api", "v1", "urls", "shorten"]}
+              "raw": "{\n  \"originalUrl\": \"https://example.com/postman-test\"\n}"
+            }
           }
         },
         {
-          "name": "POST Create Duplicate URL (same user)",
+          "name": "Create the same URL again (returns the same link)",
           "event": [
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
                   "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Returns existing URL', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.data.shortUrl).to.eql(pm.environment.get('shortUrl'));",
-                  "});"
-                ],
-                "type": "text/javascript"
+                  "pm.test('Same short code', () => pm.expect(pm.response.json().data.shortUrl).to.eql(pm.collectionVariables.get('shortUrl')));"
+                ]
               }
             }
           ],
           "request": {
             "method": "POST",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Authorization", "value": "Bearer {{jwtToken}}"}
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/shorten",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "shorten"
+              ]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\"originalUrl\":\"https://example.com/test-page\"}"
+              "raw": "{\n  \"originalUrl\": \"https://example.com/postman-test\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Create URL without http(s) (expect 400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/shorten",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "shorten"
+              ]
             },
-            "url": {"raw": "{{baseUrl}}/api/v1/urls/shorten", "host": ["{{baseUrl}}"], "path": ["api", "v1", "urls", "shorten"]}
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"originalUrl\": \"example.com\"\n}"
+            }
           }
         },
         {
-          "name": "GET My URLs",
+          "name": "My URLs",
           "event": [
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
                   "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Returns paginated URLs', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.data.content).to.be.an('array');",
-                  "  pm.expect(json.data.content.length).to.be.greaterThan(0);",
-                  "  pm.expect(json.data.content[0].shortUrl).to.be.a('string');",
+                  "pm.test('Lists the link', () => {",
+                  "  const page = pm.response.json().data;",
+                  "  pm.expect(page.totalElements).to.eql(1);",
+                  "  pm.expect(page.content[0].shortUrl).to.eql(pm.collectionVariables.get('shortUrl'));",
                   "});"
-                ],
-                "type": "text/javascript"
+                ]
               }
             }
           ],
           "request": {
             "method": "GET",
-            "header": [{"key": "Authorization", "value": "Bearer {{jwtToken}}"}],
-            "url": {"raw": "{{baseUrl}}/api/v1/urls/myurls?size=10&direction=desc", "host": ["{{baseUrl}}"], "path": ["api", "v1", "urls", "myurls"], "query": [
-              {"key": "size", "value": "10"}, {"key": "direction", "value": "desc"}
-            ]}
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/myurls?size=10&direction=desc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "myurls"
+              ],
+              "query": [
+                {
+                  "key": "size",
+                  "value": "10"
+                },
+                {
+                  "key": "direction",
+                  "value": "desc"
+                }
+              ]
+            }
           }
         },
         {
-          "name": "GET URL By ID",
+          "name": "URL by ID",
           "event": [
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Returns correct URL', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.data.id).to.eql(pm.environment.get('urlId'));",
-                  "  pm.expect(json.data.shortUrl).to.eql(pm.environment.get('shortUrl'));",
-                  "});"
-                ],
-                "type": "text/javascript"
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
               }
             }
           ],
           "request": {
             "method": "GET",
-            "header": [{"key": "Authorization", "value": "Bearer {{jwtToken}}"}],
-            "url": {"raw": "{{baseUrl}}/api/v1/urls/{{urlId}}", "host": ["{{baseUrl}}"], "path": ["api", "v1", "urls", "{{urlId}}"]}
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/{{urlId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "{{urlId}}"
+              ]
+            }
           }
         },
         {
-          "name": "PATCH Update URL",
+          "name": "Update URL",
           "event": [
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
                   "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('URL updated', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.data.originalUrl).to.eql('https://example.com/updated-page');",
-                  "});"
-                ],
-                "type": "text/javascript"
+                  "pm.test('Target changed', () => pm.expect(pm.response.json().data.originalUrl).to.include('updated'));"
+                ]
               }
             }
           ],
           "request": {
             "method": "PATCH",
             "header": [
-              {"key": "Content-Type", "value": "application/json"},
-              {"key": "Authorization", "value": "Bearer {{jwtToken}}"}
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/{{urlId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "{{urlId}}"
+              ]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\"originalUrl\":\"https://example.com/updated-page\"}"
-            },
-            "url": {"raw": "{{baseUrl}}/api/v1/urls/{{urlId}}", "host": ["{{baseUrl}}"], "path": ["api", "v1", "urls", "{{urlId}}"]}
+              "raw": "{\n  \"originalUrl\": \"https://example.com/postman-test-updated\"\n}"
+            }
           }
-        }
-      ]
-    },
-    {
-      "name": "4. Redirect & Click Tracking",
-      "item": [
+        },
         {
-          "name": "GET Redirect (multiple times to test clickCount)",
+          "name": "Redirect is 301, cached until the link expires",
           "event": [
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is 302', () => pm.response.to.have.status(302));",
-                  "pm.test('Location header points to original URL', () => {",
-                  "  pm.expect(pm.response.headers.get('Location')).to.include('example.com');",
+                  "pm.test('Status is 301', () => pm.response.to.have.status(301));",
+                  "pm.test('Location is the updated target', () => pm.expect(pm.response.headers.get('Location')).to.include('postman-test-updated'));",
+                  "pm.test('Browser cache ends when the link expires (at most 5 days)', () => {",
+                  "  const maxAge = Number(/max-age=(\\d+)/.exec(pm.response.headers.get('Cache-Control'))[1]);",
+                  "  pm.expect(maxAge).to.be.above(0).and.at.most(5 * 86400);",
                   "});"
-                ],
-                "type": "text/javascript"
+                ]
               }
             }
           ],
           "request": {
             "method": "GET",
             "header": [],
-            "url": {"raw": "{{baseUrl}}/{{shortUrl}}", "host": ["{{baseUrl}}"], "path": ["{{shortUrl}}"]}
+            "url": {
+              "raw": "{{baseUrl}}/{{shortUrl}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "{{shortUrl}}"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false
           }
-        }
-      ]
-    },
-    {
-      "name": "5. Analytics & Dashboard",
-      "item": [
+        },
         {
-          "name": "GET URL Analytics",
+          "name": "Dashboard is refused (expect 403)",
           "event": [
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Returns click event data', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.data).to.be.an('array');",
-                  "});"
-                ],
-                "type": "text/javascript"
+                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Explains which plans have analytics', () => pm.expect(pm.response.json().message).to.include('Monthly and Yearly'));"
+                ]
               }
             }
           ],
           "request": {
             "method": "GET",
-            "header": [{"key": "Authorization", "value": "Bearer {{jwtToken}}"}],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/urls/analytics?shortUrl={{shortUrl}}&startDate=2020-01-01T00:00:00&endDate=2030-12-31T23:59:59",
-              "host": ["{{baseUrl}}"], "path": ["api", "v1", "urls", "analytics"],
-              "query": [
-                {"key": "shortUrl", "value": "{{shortUrl}}"},
-                {"key": "startDate", "value": "2020-01-01T00:00:00"},
-                {"key": "endDate", "value": "2030-12-31T23:59:59"}
+              "raw": "{{baseUrl}}/api/v1/urls/dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "dashboard"
               ]
             }
           }
         },
         {
-          "name": "GET Analytics Details",
+          "name": "Unknown code (expect 404)",
           "event": [
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Returns detailed click events', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.data).to.be.an('array');",
-                  "  if (json.data.length > 0) {",
-                  "    pm.expect(json.data[0].ipAddress).to.be.a('string');",
-                  "    pm.expect(json.data[0].userAgent).to.be.a('string');",
-                  "  }",
-                  "});"
-                ],
-                "type": "text/javascript"
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));"
+                ]
               }
             }
           ],
           "request": {
             "method": "GET",
-            "header": [{"key": "Authorization", "value": "Bearer {{jwtToken}}"}],
+            "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/urls/analytics/{{shortUrl}}/details?startDate=2020-01-01T00:00:00&endDate=2030-12-31T23:59:59",
-              "host": ["{{baseUrl}}"], "path": ["api", "v1", "urls", "analytics", "{{shortUrl}}", "details"],
-              "query": [
-                {"key": "startDate", "value": "2020-01-01T00:00:00"},
-                {"key": "endDate", "value": "2030-12-31T23:59:59"}
+              "raw": "{{baseUrl}}/AAAAAAAAAA",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "AAAAAAAAAA"
               ]
             }
-          }
-        },
-        {
-          "name": "GET Total Clicks",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Returns total clicks array', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.data).to.be.an('array');",
-                  "});"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [{"key": "Authorization", "value": "Bearer {{jwtToken}}"}],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/urls/totalClicks?startDate=2020-01-01&endDate=2030-12-31",
-              "host": ["{{baseUrl}}"], "path": ["api", "v1", "urls", "totalClicks"],
-              "query": [{"key": "startDate", "value": "2020-01-01"}, {"key": "endDate", "value": "2030-12-31"}]
-            }
-          }
-        },
-        {
-          "name": "GET Top URLs",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Returns top URLs array', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.data).to.be.an('array');",
-                  "});"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [{"key": "Authorization", "value": "Bearer {{jwtToken}}"}],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/urls/top?limit=10",
-              "host": ["{{baseUrl}}"], "path": ["api", "v1", "urls", "top"],
-              "query": [{"key": "limit", "value": "10"}]
-            }
-          }
-        },
-        {
-          "name": "GET Dashboard",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Dashboard has all fields', () => {",
-                  "  const json = pm.response.json();",
-                  "  pm.expect(json.data.totalUrls).to.be.a('number');",
-                  "  pm.expect(json.data.totalClicks).to.be.a('number');",
-                  "  pm.expect(json.data.clicksToday).to.be.a('number');",
-                  "  pm.expect(json.data.clicksThisWeek).to.be.a('number');",
-                  "  pm.expect(json.data.topUrls).to.be.an('array');",
-                  "});"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [{"key": "Authorization", "value": "Bearer {{jwtToken}}"}],
-            "url": {"raw": "{{baseUrl}}/api/v1/urls/dashboard", "host": ["{{baseUrl}}"], "path": ["api", "v1", "urls", "dashboard"]}
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false
           }
         }
       ]
     },
     {
-      "name": "6. Cleanup",
+      "name": "4. Paid plans",
+      "description": "Switches plan with the development endpoint (needs DEV_PLAN_SWITCH_ENABLED=true).",
       "item": [
         {
-          "name": "DELETE URL",
+          "name": "Switch to Yearly",
           "event": [
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
                   "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('URL deleted', () => {",
-                  "  pm.expect(pm.response.json().message).to.include('deleted');",
+                  "pm.test('Yearly plan rules', () => {",
+                  "  const p = pm.response.json().data;",
+                  "  pm.expect(p.effectivePlan).to.eql('YEARLY');",
+                  "  pm.expect(p.maxActiveUrls).to.eql(500);",
+                  "  pm.expect(p.linkLifetimeDays).to.eql(null);",
+                  "  pm.expect(p.redirectStatus).to.eql(302);",
                   "});"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "method": "DELETE",
-            "header": [{"key": "Authorization", "value": "Bearer {{jwtToken}}"}],
-            "url": {"raw": "{{baseUrl}}/api/v1/urls/{{urlId}}", "host": ["{{baseUrl}}"], "path": ["api", "v1", "urls", "{{urlId}}"]}
-          }
-        },
-        {
-          "name": "POST Logout",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
-                ],
-                "type": "text/javascript"
+                ]
               }
             }
           ],
           "request": {
             "method": "POST",
-            "header": [{"key": "Authorization", "value": "Bearer {{jwtToken}}"}],
-            "url": {"raw": "{{baseUrl}}/api/v1/auth/logout", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "logout"]}
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/account/plan/dev",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "account",
+                "plan",
+                "dev"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": \"YEARLY\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Existing link no longer expires",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('expiresAt is null', () => pm.expect(pm.response.json().data.expiresAt).to.eql(null));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/{{urlId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "{{urlId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Redirect is now 302 and never cached (repeat to add clicks)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 302', () => pm.response.to.have.status(302));",
+                  "pm.test('Not cached', () => pm.expect(pm.response.headers.get('Cache-Control')).to.include('no-store'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Referer",
+                "value": "https://www.google.com/"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/{{shortUrl}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "{{shortUrl}}"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Analytics (paid)",
+      "description": "Clicks reach MongoDB through Kafka, so counts can lag the redirect by a moment.",
+      "item": [
+        {
+          "name": "URL analytics (clicks per day)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The backend accepts at most 366 days; use the last 30.",
+                  "pm.collectionVariables.set('rangeStart', new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10));",
+                  "pm.collectionVariables.set('rangeEnd', new Date(Date.now() + 86400000).toISOString().slice(0, 10));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Returns a list', () => pm.expect(pm.response.json().data).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/analytics?shortUrl={{shortUrl}}&startDate={{rangeStart}}T00:00:00&endDate={{rangeEnd}}T23:59:59",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "analytics"
+              ],
+              "query": [
+                {
+                  "key": "shortUrl",
+                  "value": "{{shortUrl}}"
+                },
+                {
+                  "key": "startDate",
+                  "value": "{{rangeStart}}T00:00:00"
+                },
+                {
+                  "key": "endDate",
+                  "value": "{{rangeEnd}}T23:59:59"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Analytics details (each click)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('IP addresses are hashed, never raw', () => {",
+                  "  pm.response.json().data.forEach((c) => { if (c.ipAddress) pm.expect(c.ipAddress).to.match(/^[0-9a-f]{64}$/); });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/analytics/{{shortUrl}}/details?startDate={{rangeStart}}T00:00:00&endDate={{rangeEnd}}T23:59:59",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "analytics",
+                "{{shortUrl}}",
+                "details"
+              ],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "{{rangeStart}}T00:00:00"
+                },
+                {
+                  "key": "endDate",
+                  "value": "{{rangeEnd}}T23:59:59"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Total clicks per day",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/totalClicks?startDate={{rangeStart}}&endDate={{rangeEnd}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "totalClicks"
+              ],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "{{rangeStart}}"
+                },
+                {
+                  "key": "endDate",
+                  "value": "{{rangeEnd}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Top URLs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/top?limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "top"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Dashboard",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Counts the link', () => pm.expect(pm.response.json().data.totalUrls).to.eql(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "dashboard"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Grace period",
+      "description": "A paid plan stays in effect for 7 days after the paid period ends, then the user is Free.",
+      "item": [
+        {
+          "name": "Payment 3 days late: still Monthly",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 19);",
+                  "pm.collectionVariables.set('periodEnd', d);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('In grace period', () => {",
+                  "  const p = pm.response.json().data;",
+                  "  pm.expect(p.effectivePlan).to.eql('MONTHLY');",
+                  "  pm.expect(p.inGracePeriod).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/account/plan/dev",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "account",
+                "plan",
+                "dev"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": \"MONTHLY\",\n  \"periodEnd\": \"{{periodEnd}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Payment 8 days late: back to Free",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = new Date(Date.now() - 8 * 86400000).toISOString().slice(0, 19);",
+                  "pm.collectionVariables.set('periodEnd', d);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Lapsed to Free', () => {",
+                  "  const p = pm.response.json().data;",
+                  "  pm.expect(p.subscribedPlan).to.eql('MONTHLY');",
+                  "  pm.expect(p.effectivePlan).to.eql('FREE');",
+                  "  pm.expect(p.inGracePeriod).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/account/plan/dev",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "account",
+                "plan",
+                "dev"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": \"MONTHLY\",\n  \"periodEnd\": \"{{periodEnd}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Guests",
+      "description": "No account: one active link per browser (X-Guest-Id), at most 10 per IP per day. Running the collection more than ~10 times a day from one machine hits the IP cap (429).",
+      "item": [
+        {
+          "name": "Guest shortens a URL",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A new browser ID per run.",
+                  "pm.collectionVariables.set('guestId', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Link has no owner and expires', () => {",
+                  "  const d = pm.response.json().data;",
+                  "  pm.expect(d.username).to.eql(null);",
+                  "  pm.expect(d.expiresAt).to.be.a('string');",
+                  "  pm.collectionVariables.set('guestShortUrl', d.shortUrl);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Guest-Id",
+                "value": "{{guestId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/guest/shorten",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "guest",
+                "shorten"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"originalUrl\": \"https://example.com/guest\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Second link from the same browser (expect 403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Suggests signing up', () => pm.expect(pm.response.json().message).to.include('Sign up'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Guest-Id",
+                "value": "{{guestId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/guest/shorten",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "guest",
+                "shorten"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"originalUrl\": \"https://example.com/guest-2\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Without X-Guest-Id (expect 400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/guest/shorten",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "guest",
+                "shorten"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"originalUrl\": \"https://example.com/guest-3\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Guest link redirects with 301",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 301', () => pm.response.to.have.status(301));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/{{guestShortUrl}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "{{guestShortUrl}}"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Cleanup",
+      "item": [
+        {
+          "name": "Delete URL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/urls/{{urlId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "urls",
+                "{{urlId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Deleted link no longer redirects (expect 404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/{{shortUrl}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "{{shortUrl}}"
+              ]
+            }
+          },
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "Logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "logout"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Refresh after logout (expect 401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/public/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "public",
+                "refresh"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            }
           }
         }
       ]
