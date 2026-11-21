@@ -42,6 +42,7 @@ public class UrlShortenerMetrics {
     private final Counter cacheHits;
     private final Counter cacheMisses;
     private final Counter kafkaEventsPublished;
+    private final Counter kafkaPublishFailures;
     private final Counter kafkaEventsConsumed;
     private final Counter kafkaEventsDeadLetter;
     private final Counter mongoWrites;
@@ -112,6 +113,10 @@ public class UrlShortenerMetrics {
                 .description("Kafka events published")
                 .register(registry);
 
+        this.kafkaPublishFailures = Counter.builder("kafka.events.publish.failures.count")
+                .description("Kafka events that failed to publish")
+                .register(registry);
+
         this.kafkaEventsConsumed = Counter.builder("kafka.events.consumed.count")
                 .description("Kafka events consumed")
                 .register(registry);
@@ -137,32 +142,20 @@ public class UrlShortenerMetrics {
                 .register(registry);
 
         // Timers
-        this.urlCreationTime = Timer.builder("url.creation.time")
-                .description("Time to create a short URL")
-                .register(registry);
+        this.urlCreationTime = histogramTimer("url.creation.time", "Time to create a short URL");
+        this.redirectTotalTime = histogramTimer("redirect.total.time", "Total redirect response time");
+        this.redisLookupTime = histogramTimer("redis.lookup.time", "Redis cache lookup time");
+        this.dynamoLookupTime = histogramTimer("dynamodb.lookup.time", "DynamoDB lookup time");
+        this.kafkaPublishTime = histogramTimer("kafka.publish.time", "Kafka event publish time");
+        this.mongoPersistTime = histogramTimer("mongo.persist.time", "MongoDB document persist time");
+        this.analyticsQueryTime = histogramTimer("analytics.query.time", "Analytics query execution time");
+    }
 
-        this.redirectTotalTime = Timer.builder("redirect.total.time")
-                .description("Total redirect response time")
-                .register(registry);
-
-        this.redisLookupTime = Timer.builder("redis.lookup.time")
-                .description("Redis cache lookup time")
-                .register(registry);
-
-        this.dynamoLookupTime = Timer.builder("dynamodb.lookup.time")
-                .description("DynamoDB lookup time")
-                .register(registry);
-
-        this.kafkaPublishTime = Timer.builder("kafka.publish.time")
-                .description("Kafka event publish time")
-                .register(registry);
-
-        this.mongoPersistTime = Timer.builder("mongo.persist.time")
-                .description("MongoDB document persist time")
-                .register(registry);
-
-        this.analyticsQueryTime = Timer.builder("analytics.query.time")
-                .description("Analytics query execution time")
+    // Histogram buckets are required by the Grafana histogram_quantile panels.
+    private Timer histogramTimer(String name, String description) {
+        return Timer.builder(name)
+                .description(description)
+                .publishPercentileHistogram()
                 .register(registry);
     }
 
@@ -182,6 +175,7 @@ public class UrlShortenerMetrics {
     public void incrementCacheHit() { cacheHits.increment(); }
     public void incrementCacheMiss() { cacheMisses.increment(); }
     public void incrementKafkaPublished() { kafkaEventsPublished.increment(); }
+    public void incrementKafkaPublishFailure() { kafkaPublishFailures.increment(); }
     public void incrementKafkaConsumed() { kafkaEventsConsumed.increment(); }
     public void incrementKafkaDeadLetter() { kafkaEventsDeadLetter.increment(); }
     public void incrementMongoWrite() { mongoWrites.increment(); }

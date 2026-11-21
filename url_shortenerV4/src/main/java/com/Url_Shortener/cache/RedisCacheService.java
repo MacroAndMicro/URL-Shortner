@@ -35,6 +35,8 @@ import java.util.Optional;
 public class RedisCacheService implements CacheService {
 
     private static final Logger log = LoggerFactory.getLogger(RedisCacheService.class);
+    private static final String MISSING_KEY_PREFIX = "missing:";
+    private static final Duration MISSING_TTL = Duration.ofMinutes(5);
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -73,6 +75,7 @@ public class RedisCacheService implements CacheService {
         try {
             String json = objectMapper.writeValueAsString(data);
             redisTemplate.opsForValue().set(shortUrl, json, ttl);
+            redisTemplate.delete(MISSING_KEY_PREFIX + shortUrl);
             log.debug("Redis PUT for shortUrl: {}", shortUrl);
         } catch (JsonProcessingException e) {
             log.warn("Redis PUT serialization failed for shortUrl '{}': {}. Data is still persisted in DynamoDB.",
@@ -94,6 +97,25 @@ public class RedisCacheService implements CacheService {
             // Redis failure → the TTL will eventually expire the stale entry.
             log.warn("Redis EVICT failed for shortUrl '{}': {}. Stale cache entry will expire via TTL.",
                     shortUrl, e.getMessage());
+        }
+    }
+
+    @Override
+    public void markMissing(String shortUrl) {
+        try {
+            redisTemplate.opsForValue().set(MISSING_KEY_PREFIX + shortUrl, "1", MISSING_TTL);
+        } catch (Exception e) {
+            log.warn("Redis markMissing failed for shortUrl '{}': {}", shortUrl, e.getMessage());
+        }
+    }
+
+    @Override
+    public boolean isMarkedMissing(String shortUrl) {
+        try {
+            return Boolean.TRUE.equals(redisTemplate.hasKey(MISSING_KEY_PREFIX + shortUrl));
+        } catch (Exception e) {
+            log.warn("Redis isMarkedMissing failed for shortUrl '{}': {}", shortUrl, e.getMessage());
+            return false;
         }
     }
 }

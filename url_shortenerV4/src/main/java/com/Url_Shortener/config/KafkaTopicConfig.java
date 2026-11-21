@@ -15,7 +15,7 @@ import org.springframework.kafka.config.TopicBuilder;
  *
  * Topics:
  *   analytics-events     — Main event topic (3 partitions)
- *   analytics-events-dlt — Dead Letter Topic (1 partition)
+ *   analytics-events-dlt — Dead Letter Topic (3 partitions)
  */
 @Configuration
 public class KafkaTopicConfig {
@@ -30,8 +30,9 @@ public class KafkaTopicConfig {
 
     @Bean
     public NewTopic analyticsEventsDltTopic() {
+        // Must match analytics-events: the recoverer keeps each record's partition number.
         return TopicBuilder.name("analytics-events-dlt")
-                .partitions(1)
+                .partitions(3)
                 .replicas(1)
                 .build();
     }

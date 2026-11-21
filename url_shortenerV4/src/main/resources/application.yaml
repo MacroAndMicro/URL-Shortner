@@ -3,20 +3,25 @@ spring:
     name: Url_Shortener
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/urlshortener}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/urlshortener}
     username: ${SPRING_DATASOURCE_USERNAME:postgres}
     password: ${SPRING_DATASOURCE_PASSWORD:postgres123}
     driver-class-name: org.postgresql.Driver
 
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
 
-    show-sql: true
+    show-sql: false
 
     properties:
       hibernate:
         format_sql: true
+
+  # Existing databases were created by Hibernate, so they start at the V1 baseline.
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 1
 
   # ============================================================
   # POLYGLOT PERSISTENCE: Redis Cache
@@ -25,52 +30,32 @@ spring:
     redis:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
       port: ${SPRING_DATA_REDIS_PORT:6379}
-      timeout: 2000ms
+      timeout: 500ms
+      connect-timeout: 500ms
       lettuce:
         pool:
           max-active: 8
           max-idle: 8
           min-idle: 2
-    # ============================================================
-    # POLYGLOT PERSISTENCE: MongoDB (Analytics)
-    # ============================================================
     mongodb:
-      uri: ${SPRING_DATA_MONGODB_URI:mongodb://localhost:27017/urlshortener}
-      database: urlshortener
+      auto-index-creation: true
+
+  # ============================================================
+  # POLYGLOT PERSISTENCE: MongoDB (Analytics)
+  # ============================================================
+  mongodb:
+    uri: ${SPRING_MONGODB_URI:mongodb://localhost:27017/urlshortener}
+    database: urlshortener
 
   # ============================================================
   # POLYGLOT PERSISTENCE: Kafka (Analytics Event Streaming)
+  # Producer, consumer and retry settings are in KafkaConfig.
   # ============================================================
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      acks: all
-      properties:
-        enable.idempotence: true
-        max.in.flight.requests.per.connection: 5
-        batch.size: 16384
-        linger.ms: 5
-    consumer:
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      group-id: analytics-consumer
-      properties:
-        spring.json.trusted.packages: "com.Url_Shortener.event"
-    listener:
-      ack-mode: manual
-    retry:
-      topic:
-        enabled: true
-      attempts: 3
-      backoff:
-        initial-interval: 1000
-        multiplier: 2.0
-        max-interval: 10000
 
 jwt:
-  secret: ${JWT_SECRET:gcowAfycBs76wnCP7cvO6xe5Qtq2hZWd2k++abz5ub0=}
+  secret: ${JWT_SECRET}
   expiration: 86400000
   refresh-expiration: 604800000
 
@@ -84,17 +69,26 @@ server:
       force: true
 
 # ============================================================
-# Application Cache Settings
+# Application Settings
 # ============================================================
 app:
   cache:
     redis:
       ttl-hours: ${REDIS_CACHE_TTL_HOURS:24}
+  analytics:
+    ip-salt: ${ANALYTICS_IP_SALT:}
+  rate-limit:
+    auth-per-minute: ${RATE_LIMIT_AUTH_PER_MINUTE:20}
+    shorten-per-minute: ${RATE_LIMIT_SHORTEN_PER_MINUTE:60}
+    redirect-per-minute: ${RATE_LIMIT_REDIRECT_PER_MINUTE:600}
 
 # ============================================================
 # OBSERVABILITY: Spring Boot Actuator & Prometheus
+# Served on a separate port that is not published by Docker Compose.
 # ============================================================
 management:
+  server:
+    port: ${MANAGEMENT_PORT:8090}
   endpoints:
     web:
       exposure:
@@ -104,9 +98,6 @@ management:
       show-details: always
       show-components: always
   metrics:
-    export:
-      prometheus:
-        enabled: true
     tags:
       application: url-shortener
 

@@ -3,14 +3,16 @@ package com.Url_Shortener.service;
 import com.Url_Shortener.dto.LoginRequestDto;
 import com.Url_Shortener.dto.RegisterRequestDto;
 import com.Url_Shortener.dto.UserProfileDto;
-import com.Url_Shortener.entity.RefreshToken;
 import com.Url_Shortener.entity.User;
+import com.Url_Shortener.exception.ConflictException;
+import com.Url_Shortener.metrics.UrlShortenerMetrics;
 import com.Url_Shortener.repository.UserRepository;
 import com.Url_Shortener.security.jwt.JwtAuthenticationResponse;
 import com.Url_Shortener.security.jwt.JwtUtils;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -25,25 +27,34 @@ public class UserService {
     private final AuthenticationManager authenticationManager;
     private final JwtUtils jwtUtils;
     private final RefreshTokenService refreshTokenService;
+    private final UrlShortenerMetrics metrics;
 
     public UserService(PasswordEncoder passwordEncoder, UserRepository userRepository,
                        AuthenticationManager authenticationManager, JwtUtils jwtUtils,
-                       RefreshTokenService refreshTokenService) {
+                       RefreshTokenService refreshTokenService, UrlShortenerMetrics metrics) {
         this.passwordEncoder = passwordEncoder;
         this.userRepository = userRepository;
         this.authenticationManager = authenticationManager;
         this.jwtUtils = jwtUtils;
         this.refreshTokenService = refreshTokenService;
+        this.metrics = metrics;
     }
 
     public JwtAuthenticationResponse authenticateUser(LoginRequestDto loginRequest){
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(loginRequest.getUsername(),
-                        loginRequest.getPassword()));
+        Authentication authentication;
+        try {
+            authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(loginRequest.getUsername(),
+                            loginRequest.getPassword()));
+        } catch (AuthenticationException e) {
+            metrics.incrementAuthLoginFailure();
+            throw e;
+        }
         SecurityContextHolder.getContext().setAuthentication(authentication);
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
         String jwt = jwtUtils.generateToken(userDetails);
-        String refreshToken = refreshTokenService.createRefreshToken(userDetails.getUsername()).getToken();
+        String refreshToken = refreshTokenService.createRefreshToken(userDetails.getUsername()).token();
+        metrics.incrementAuthLoginSuccess();
         return new JwtAuthenticationResponse(jwt, refreshToken);
     }
 
@@ -52,12 +63,12 @@ public class UserService {
         User user = new User();
         if(userRepository.existsByUsername(registerRequest.getUsername()))
         {
-            throw new RuntimeException("Username already exists");
+            throw new ConflictException("Username already exists");
         }
 
         if(userRepository.existsByEmail(registerRequest.getEmail()))
         {
-            throw new RuntimeException("Email already exists");
+            throw new ConflictException("Email already exists");
         }
         user.setUsername(registerRequest.getUsername());
 
@@ -88,11 +99,11 @@ public class UserService {
     }
 
     public JwtAuthenticationResponse refreshToken(String refreshTokenValue) {
-        RefreshToken newRefreshToken = refreshTokenService.verifyAndRotate(refreshTokenValue);
-        User user = newRefreshToken.getUser();
-        UserDetailsImpl userDetails = UserDetailsImpl.build(user);
+        metrics.incrementAuthRefresh();
+        RefreshTokenService.IssuedRefreshToken newRefreshToken = refreshTokenService.verifyAndRotate(refreshTokenValue);
+        UserDetailsImpl userDetails = UserDetailsImpl.build(newRefreshToken.user());
         String jwt = jwtUtils.generateToken(userDetails);
-        return new JwtAuthenticationResponse(jwt, newRefreshToken.getToken());
+        return new JwtAuthenticationResponse(jwt, newRefreshToken.token());
     }
 
     public void logout(String username) {

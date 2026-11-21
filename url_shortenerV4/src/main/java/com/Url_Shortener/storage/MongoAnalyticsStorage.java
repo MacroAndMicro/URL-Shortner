@@ -7,11 +7,21 @@ import com.Url_Shortener.model.ClickEventDocument;
 import com.Url_Shortener.repository.ClickEventMongoRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.DateOperators;
+import org.springframework.data.mongodb.core.aggregation.TypedAggregation;
+import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -19,15 +29,13 @@ import java.util.stream.Collectors;
  * MONGODB MIGRATION: Mongo Analytics Storage
  * ============================================================
  *
- * Implements AnalyticsStorage using MongoDB via
- * ClickEventMongoRepository. This is the ONLY class in the
- * application that knows about MongoDB-specific types.
+ * Implements AnalyticsStorage using MongoDB. This is the ONLY class
+ * in the application that knows about MongoDB-specific types.
  *
  * ERROR HANDLING:
- * Following the RedisCacheService pattern, all methods wrap
- * operations in try/catch. MongoDB failures must never prevent
- * redirects from working. On error, queries return empty/zero
- * results and log a warning.
+ * Queries wrap operations in try/catch: on error they return
+ * empty/zero results and log a warning. saveClickEvent rethrows
+ * so the Kafka consumer can retry and dead-letter failed events.
  */
 @Service
 public class MongoAnalyticsStorage implements AnalyticsStorage {
@@ -35,11 +43,14 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
     private static final Logger log = LoggerFactory.getLogger(MongoAnalyticsStorage.class);
 
     private final ClickEventMongoRepository mongoRepository;
+    private final MongoTemplate mongoTemplate;
     private final UrlShortenerMetrics metrics;
 
     public MongoAnalyticsStorage(ClickEventMongoRepository mongoRepository,
+                                  MongoTemplate mongoTemplate,
                                   UrlShortenerMetrics metrics) {
         this.mongoRepository = mongoRepository;
+        this.mongoTemplate = mongoTemplate;
         this.metrics = metrics;
     }
 
@@ -48,35 +59,24 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
     // ============================================================
 
     @Override
-    public void saveClickEvent(String shortUrl, String ipAddress, String referrer, String userAgent) {
-        // OLD POSTGRES IMPLEMENTATION
-        // ClickEvent clickEvent = new ClickEvent();
-        // clickEvent.setClickDate(LocalDateTime.now());
-        // clickEvent.setShortUrl(shortUrl);
-        // clickEvent.setIpAddress(ipAddress);
-        // clickEvent.setReferrer(referrer);
-        // clickEvent.setUserAgent(userAgent);
-        // clickEventRepository.save(clickEvent);
-
-        // NEW MONGODB IMPLEMENTATION
+    public boolean saveClickEvent(String eventId, String shortUrl, LocalDateTime clickDate,
+                                  String ipAddress, String referrer, String userAgent) {
         var sample = metrics.startTimer();
         try {
-            ClickEventDocument doc = new ClickEventDocument(
-                    shortUrl,
-                    LocalDateTime.now(),
-                    ipAddress,
-                    referrer,
-                    userAgent
-            );
-            mongoRepository.save(doc);
+            mongoRepository.insert(new ClickEventDocument(
+                    eventId, shortUrl, clickDate, ipAddress, referrer, userAgent));
             metrics.incrementMongoWrite();
             metrics.stopMongoPersistTime(sample);
+            return true;
+        } catch (DuplicateKeyException e) {
+            metrics.stopMongoPersistTime(sample);
+            log.debug("Ignoring redelivered click event: eventId={}", eventId);
+            return false;
         } catch (Exception e) {
-            // HOT PATH: Never throw to the caller. A failed analytics write
-            // must not prevent the user from being redirected.
             metrics.incrementMongoWriteFailure();
             metrics.stopMongoPersistTime(sample);
             log.warn("Failed to log click event for shortUrl '{}': {}", shortUrl, e.getMessage());
+            throw e;
         }
     }
 
@@ -86,12 +86,6 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
 
     @Override
     public List<ClickEventDetailDto> findByShortUrlAndDateBetween(String shortUrl, LocalDateTime start, LocalDateTime end) {
-        // OLD POSTGRES IMPLEMENTATION
-        // return clickEventRepository.findByShortUrlAndClickDateBetween(shortUrl, start, end).stream()
-        //         .map(click -> new ClickEventDetailDto(click.getId(), ...))
-        //         .toList();
-
-        // NEW MONGODB IMPLEMENTATION
         try {
             return mongoRepository.findByShortUrlAndClickDateBetween(shortUrl, start, end).stream()
                     .map(this::toDetailDto)
@@ -108,10 +102,6 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
 
     @Override
     public long countByShortUrlAndDateBetween(String shortUrl, LocalDateTime start, LocalDateTime end) {
-        // OLD POSTGRES IMPLEMENTATION
-        // return clickEventRepository.countByShortUrlAndClickDateBetween(shortUrl, start, end);
-
-        // NEW MONGODB IMPLEMENTATION
         try {
             return mongoRepository.countByShortUrlAndClickDateBetween(shortUrl, start, end);
         } catch (Exception e) {
@@ -121,67 +111,72 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
     }
 
     // ============================================================
-    // AGGREGATION: Single URL — Click Events Grouped by Date
+    // AGGREGATION: Clicks Grouped by Date
     // ============================================================
 
     @Override
     public List<ClickEventDto> findAggregatedByShortUrlAndDateBetween(String shortUrl, LocalDateTime start, LocalDateTime end) {
-        // OLD POSTGRES IMPLEMENTATION
-        // return clickEventRepository.findByShortUrlAndClickDateBetween(shortUrl, start, end).stream()
-        //         .collect(Collectors.groupingBy(click -> click.getClickDate().toLocalDate(), Collectors.counting()))
-        //         .entrySet().stream().map(entry -> { ClickEventDto dto = new ClickEventDto(); ... }).toList();
-
-        // NEW MONGODB IMPLEMENTATION
-        try {
-            return mongoRepository.findByShortUrlAndClickDateBetween(shortUrl, start, end).stream()
-                    .collect(Collectors.groupingBy(
-                            doc -> doc.getClickDate().toLocalDate(),
-                            Collectors.counting()))
-                    .entrySet().stream()
-                    .map(entry -> {
-                        ClickEventDto dto = new ClickEventDto();
-                        dto.setClickDate(entry.getKey());
-                        dto.setCount(entry.getValue());
-                        return dto;
-                    })
-                    .toList();
-        } catch (Exception e) {
-            log.warn("Failed to aggregate click events for shortUrl '{}': {}", shortUrl, e.getMessage());
-            return Collections.emptyList();
-        }
+        return findAggregatedByShortUrlsAndDateBetween(List.of(shortUrl), start, end);
     }
-
-    // ============================================================
-    // AGGREGATION: Multiple URLs — Clicks Grouped by Date
-    // ============================================================
 
     @Override
     public List<ClickEventDto> findAggregatedByShortUrlsAndDateBetween(List<String> shortUrls, LocalDateTime start, LocalDateTime end) {
-        // OLD POSTGRES IMPLEMENTATION
-        // List<ClickEvent> clickEvents = clickEventRepository.findByShortUrlInAndClickDateBetween(shortUrls, ...);
-        // return clickEvents.stream().collect(Collectors.groupingBy(...))...sorted()...
-
-        // NEW MONGODB IMPLEMENTATION
         if (shortUrls.isEmpty()) {
             return Collections.emptyList();
         }
+        var sample = metrics.startTimer();
         try {
-            return mongoRepository.findByShortUrlInAndClickDateBetween(shortUrls, start, end).stream()
-                    .collect(Collectors.groupingBy(
-                            doc -> doc.getClickDate().toLocalDate(),
-                            Collectors.counting()))
-                    .entrySet().stream()
-                    .map(entry -> {
+            // LocalDateTime is stored using the system zone, so group days in that zone too.
+            TypedAggregation<ClickEventDocument> aggregation = Aggregation.newAggregation(
+                    ClickEventDocument.class,
+                    Aggregation.match(inRange(shortUrls, start, end)),
+                    Aggregation.project()
+                            .and(DateOperators.DateToString.dateOf("clickDate")
+                                    .toString("%Y-%m-%d")
+                                    .withTimezone(DateOperators.Timezone.valueOf(ZoneId.systemDefault().getId())))
+                            .as("day"),
+                    Aggregation.group("day").count().as("count"),
+                    Aggregation.sort(Sort.Direction.ASC, "_id"));
+
+            return mongoTemplate.aggregate(aggregation, GroupCount.class).getMappedResults().stream()
+                    .map(group -> {
                         ClickEventDto dto = new ClickEventDto();
-                        dto.setClickDate(entry.getKey());
-                        dto.setCount(entry.getValue());
+                        dto.setClickDate(LocalDate.parse(group.id));
+                        dto.setCount(group.count);
                         return dto;
                     })
-                    .sorted((a, b) -> a.getClickDate().compareTo(b.getClickDate()))
                     .toList();
         } catch (Exception e) {
             log.warn("Failed to aggregate clicks for {} shortUrls: {}", shortUrls.size(), e.getMessage());
             return Collections.emptyList();
+        } finally {
+            metrics.stopAnalyticsQueryTime(sample);
+        }
+    }
+
+    // ============================================================
+    // AGGREGATION: Clicks Grouped by Short URL
+    // ============================================================
+
+    @Override
+    public Map<String, Long> countPerShortUrlAndDateBetween(List<String> shortUrls, LocalDateTime start, LocalDateTime end) {
+        if (shortUrls.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        var sample = metrics.startTimer();
+        try {
+            TypedAggregation<ClickEventDocument> aggregation = Aggregation.newAggregation(
+                    ClickEventDocument.class,
+                    Aggregation.match(inRange(shortUrls, start, end)),
+                    Aggregation.group("shortUrl").count().as("count"));
+
+            return mongoTemplate.aggregate(aggregation, GroupCount.class).getMappedResults().stream()
+                    .collect(Collectors.toMap(group -> group.id, group -> group.count));
+        } catch (Exception e) {
+            log.warn("Failed to count clicks per URL for {} shortUrls: {}", shortUrls.size(), e.getMessage());
+            return Collections.emptyMap();
+        } finally {
+            metrics.stopAnalyticsQueryTime(sample);
         }
     }
 
@@ -191,10 +186,6 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
 
     @Override
     public long countByShortUrlsAndDateBetween(List<String> shortUrls, LocalDateTime start, LocalDateTime end) {
-        // OLD POSTGRES IMPLEMENTATION
-        // return shortUrls.isEmpty() ? 0 : clickEventRepository.countByShortUrlInAndClickDateBetween(shortUrls, start, end);
-
-        // NEW MONGODB IMPLEMENTATION
         if (shortUrls.isEmpty()) {
             return 0;
         }
@@ -212,10 +203,6 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
 
     @Override
     public void deleteByShortUrl(String shortUrl) {
-        // OLD POSTGRES IMPLEMENTATION
-        // clickEventRepository.deleteByShortUrl(shortUrl);
-
-        // NEW MONGODB IMPLEMENTATION
         try {
             mongoRepository.deleteByShortUrl(shortUrl);
         } catch (Exception e) {
@@ -233,6 +220,10 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
         }
     }
 
+    private Criteria inRange(List<String> shortUrls, LocalDateTime start, LocalDateTime end) {
+        return Criteria.where("shortUrl").in(shortUrls).and("clickDate").gte(start).lt(end);
+    }
+
     // ============================================================
     // Mapper: ClickEventDocument → ClickEventDetailDto
     // ============================================================
@@ -245,5 +236,10 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
                 doc.getReferrer(),
                 doc.getUserAgent()
         );
+    }
+
+    private static class GroupCount {
+        String id;
+        long count;
     }
 }

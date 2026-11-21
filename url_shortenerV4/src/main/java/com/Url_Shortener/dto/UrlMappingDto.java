@@ -1,8 +1,12 @@
 package com.Url_Shortener.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+
 import java.time.LocalDateTime;
 
 public class UrlMappingDto {
+    // IDs are random 63-bit values, which exceed JavaScript's safe integer range.
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private Long id;
     private String originalUrl;
     private String shortUrl;

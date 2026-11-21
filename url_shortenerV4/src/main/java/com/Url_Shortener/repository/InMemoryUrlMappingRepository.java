@@ -111,18 +111,6 @@ public class InMemoryUrlMappingRepository extends UrlMappingDynamoRepository {
     }
 
     @Override
-    public boolean existsByShortUrl(String shortUrl) {
-        return store.containsKey(shortUrl);
-    }
-
-    @Override
-    public boolean existsByOriginalUrlAndOwnerId(String originalUrl, Long ownerId) {
-        return store.values().stream()
-                .anyMatch(i -> i.getOwnerId().equals(ownerId)
-                        && i.getOriginalUrl().equals(originalUrl));
-    }
-
-    @Override
     public long countByOwnerId(Long ownerId) {
         return store.values().stream()
                 .filter(i -> i.getOwnerId().equals(ownerId))
@@ -140,5 +128,14 @@ public class InMemoryUrlMappingRepository extends UrlMappingDynamoRepository {
             v.setClickCount((v.getClickCount() != null ? v.getClickCount() : 0) + 1);
             return v;
         });
+    }
+
+    @Override
+    public boolean updateOriginalUrl(String shortUrl, String originalUrl, String updatedDate) {
+        return store.computeIfPresent(shortUrl, (k, v) -> {
+            v.setOriginalUrl(originalUrl);
+            v.setUpdatedDate(updatedDate);
+            return v;
+        }) != null;
     }
 }

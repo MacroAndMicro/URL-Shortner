@@ -53,8 +53,8 @@ public class UrlMappingDynamoRepository {
      * does not block Spring Boot startup. The table must exist before
      * any read/write operations succeed.
      *
-     * Connection timeouts are set to 10s (API call) and 5s (attempt).
-     * Table creation retries once on transient failures.
+     * Retries until it succeeds, so a slow start or a DynamoDB outage
+     * at startup cannot leave the application without its table.
      */
     @PostConstruct
     public void ensureTableExists() {
@@ -65,23 +65,39 @@ public class UrlMappingDynamoRepository {
         Thread initThread = new Thread(() -> {
             try {
                 Thread.sleep(1000); // Brief delay to let everything settle
-                dynamoDbClient.describeTable(r -> r.tableName(tableName));
-                System.out.println("INFO: DynamoDB table '" + tableName + "' already exists.");
-            } catch (ResourceNotFoundException e) {
-                try {
-                    createTable();
-                    System.out.println("INFO: DynamoDB table '" + tableName + "' created successfully.");
-                } catch (Exception createEx) {
-                    System.err.println("WARN: Could not create DynamoDB table '"
-                            + tableName + "': " + createEx.getMessage());
+                while (!tryEnsureTableExists()) {
+                    Thread.sleep(5000);
                 }
-            } catch (Exception e) {
-                System.err.println("WARN: Could not connect to DynamoDB at startup: "
-                        + e.getMessage());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
         }, "dynamodb-init");
         initThread.setDaemon(true);
         initThread.start();
+    }
+
+    private boolean tryEnsureTableExists() {
+        try {
+            dynamoDbClient.describeTable(r -> r.tableName(tableName));
+            System.out.println("INFO: DynamoDB table '" + tableName + "' already exists.");
+            return true;
+        } catch (ResourceNotFoundException e) {
+            try {
+                createTable();
+                System.out.println("INFO: DynamoDB table '" + tableName + "' created successfully.");
+                return true;
+            } catch (ResourceInUseException inUse) {
+                // Another application instance created it first.
+                return true;
+            } catch (Exception createEx) {
+                System.err.println("WARN: Could not create DynamoDB table '"
+                        + tableName + "', will retry: " + createEx.getMessage());
+                return false;
+            }
+        } catch (Exception e) {
+            System.err.println("WARN: Could not reach DynamoDB at startup, will retry: " + e.getMessage());
+            return false;
+        }
     }
 
     private void createTable() {
@@ -249,14 +265,7 @@ public class UrlMappingDynamoRepository {
                             .limit(pageSize)
                             .scanIndexForward(ascending);
                     if (lastEvaluatedKey != null && !lastEvaluatedKey.isEmpty()) {
-                        Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValue> key =
-                                lastEvaluatedKey.entrySet().stream()
-                                        .collect(Collectors.toMap(
-                                                Map.Entry::getKey,
-                                                e -> software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
-                                                        .s(e.getValue()).build()
-                                        ));
-                        r.exclusiveStartKey(key);
+                        r.exclusiveStartKey(toExclusiveStartKey(ownerId, lastEvaluatedKey));
                     }
                 });
 
@@ -270,7 +279,10 @@ public class UrlMappingDynamoRepository {
 
         Map<String, String> nextKey = null;
         if (page.lastEvaluatedKey() != null && !page.lastEvaluatedKey().isEmpty()) {
+            // Keep only the string attributes. ownerId is numeric and is
+            // restored from the authenticated user on the next request.
             nextKey = page.lastEvaluatedKey().entrySet().stream()
+                    .filter(e -> e.getValue().s() != null)
                     .collect(Collectors.toMap(
                             Map.Entry::getKey,
                             e -> e.getValue().s()
@@ -278,6 +290,22 @@ public class UrlMappingDynamoRepository {
         }
 
         return new DynamoPageResult<>(items, nextKey);
+    }
+
+    private Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValue> toExclusiveStartKey(
+            Long ownerId, Map<String, String> lastEvaluatedKey) {
+        String createdDate = lastEvaluatedKey.get("createdDate");
+        String shortUrl = lastEvaluatedKey.get("shortUrl");
+        if (createdDate == null || shortUrl == null) {
+            throw new IllegalArgumentException("Invalid cursor");
+        }
+        return Map.of(
+                "ownerId", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                        .n(ownerId.toString()).build(),
+                "createdDate", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                        .s(createdDate).build(),
+                "shortUrl", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                        .s(shortUrl).build());
     }
 
     // ============================================================
@@ -304,32 +332,6 @@ public class UrlMappingDynamoRepository {
     public Optional<UrlMappingItem> findByIdAndOwnerId(Long id, Long ownerId) {
         Optional<UrlMappingItem> item = findById(id);
         return item.filter(i -> i.getOwnerId().equals(ownerId));
-    }
-
-    // ============================================================
-    // EXISTENCE CHECKS
-    // ============================================================
-
-    /**
-     * Checks if a short URL already exists in the table.
-     */
-    public boolean existsByShortUrl(String shortUrl) {
-        return findByShortUrl(shortUrl).isPresent();
-    }
-
-    /**
-     * Checks if a user has already shortened a given original URL.
-     * Queries the ownerId-index GSI and filters by originalUrl.
-     */
-    public boolean existsByOriginalUrlAndOwnerId(String originalUrl, Long ownerId) {
-        QueryConditional condition = QueryConditional.keyEqualTo(
-                Key.builder().partitionValue(ownerId).build()
-        );
-        return urlMappingTable.index("ownerId-index")
-                .query(r -> r.queryConditional(condition))
-                .stream()
-                .flatMap(page -> page.items().stream())
-                .anyMatch(item -> item.getOriginalUrl().equals(originalUrl));
     }
 
     // ============================================================
@@ -368,23 +370,55 @@ public class UrlMappingDynamoRepository {
 
     /**
      * Atomically increments the clickCount for a given short URL.
-     * Uses DynamoDB UpdateExpression: SET clickCount = clickCount + :inc
+     * Does nothing if the mapping has been deleted, because a click event
+     * can still be in flight when that happens.
      *
      * NOTE: Uses the low-level DynamoDbClient (not the Enhanced client)
      * because atomic increment via UpdateExpression is not supported
      * by the Enhanced client's updateItem (which replaces entire items).
      */
     public void incrementClickCount(String shortUrl) {
-        dynamoDbClient.updateItem(UpdateItemRequest.builder()
-                .tableName(tableName)
-                .key(Map.of("shortUrl",
-                        software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
-                                .s(shortUrl).build()))
-                .updateExpression("SET clickCount = clickCount + :inc")
-                .expressionAttributeValues(Map.of(":inc",
-                        software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
-                                .n("1").build()))
-                .build());
+        try {
+            dynamoDbClient.updateItem(UpdateItemRequest.builder()
+                    .tableName(tableName)
+                    .key(Map.of("shortUrl",
+                            software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                                    .s(shortUrl).build()))
+                    .updateExpression("ADD clickCount :inc")
+                    .conditionExpression("attribute_exists(shortUrl)")
+                    .expressionAttributeValues(Map.of(":inc",
+                            software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                                    .n("1").build()))
+                    .build());
+        } catch (ConditionalCheckFailedException e) {
+            // Mapping was deleted; there is no count left to update.
+        }
+    }
+
+    /**
+     * Updates only the original URL attributes, leaving clickCount untouched.
+     *
+     * @return true if updated, false if the mapping no longer exists
+     */
+    public boolean updateOriginalUrl(String shortUrl, String originalUrl, String updatedDate) {
+        try {
+            dynamoDbClient.updateItem(UpdateItemRequest.builder()
+                    .tableName(tableName)
+                    .key(Map.of("shortUrl",
+                            software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                                    .s(shortUrl).build()))
+                    .updateExpression("SET originalUrl = :originalUrl, updatedDate = :updatedDate")
+                    .conditionExpression("attribute_exists(shortUrl)")
+                    .expressionAttributeValues(Map.of(
+                            ":originalUrl", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                                    .s(originalUrl).build(),
+                            ":updatedDate", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                                    .s(updatedDate).build()))
+                    .build());
+            return true;
+        } catch (ConditionalCheckFailedException e) {
+            return false;
+        }
     }
 
     // ============================================================

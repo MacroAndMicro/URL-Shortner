@@ -1,7 +1,7 @@
 ============================================================
 LOCAL DEVELOPMENT (NO DOCKER APP)
 ============================================================
-Prerequisites: PostgreSQL running on localhost:5432
+Prerequisites: PostgreSQL running on localhost:5434 (the port published by Docker Compose)
   Database: urlshortener | User: postgres | Password: postgres123
 
 Run the app locally (IDE or CLI):

@@ -1,0 +1,232 @@
+package com.Url_Shortener;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.ByteArrayDeserializer;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.kafka.KafkaContainer;
+import org.testcontainers.mongodb.MongoDBContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
+
+/**
+ * Runs the full flow against real infrastructure. Requires Docker;
+ * skipped when Docker is unavailable. Run with: ./mvnw verify
+ */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Testcontainers(disabledWithoutDocker = true)
+class UrlShortenerIT {
+
+    @Container
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16");
+
+    @Container
+    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:7");
+
+    @Container
+    static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:4.3.1");
+
+    @Container
+    static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7").withExposedPorts(6379);
+
+    @Container
+    static final GenericContainer<?> DYNAMODB = new GenericContainer<>("amazon/dynamodb-local:2.5.4")
+            .withCommand("-jar DynamoDBLocal.jar -sharedDb -inMemory")
+            .withExposedPorts(8000);
+
+    @DynamicPropertySource
+    static void properties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+        registry.add("spring.datasource.username", POSTGRES::getUsername);
+        registry.add("spring.datasource.password", POSTGRES::getPassword);
+        registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
+        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
+        registry.add("spring.jpa.properties.hibernate.dialect", () -> "org.hibernate.dialect.PostgreSQLDialect");
+        registry.add("spring.flyway.enabled", () -> "true");
+        registry.add("spring.mongodb.uri", () -> MONGO.getConnectionString() + "/urlshortener");
+        registry.add("spring.mongodb.database", () -> "urlshortener");
+        registry.add("spring.data.mongodb.auto-index-creation", () -> "true");
+        registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
+        registry.add("spring.data.redis.host", REDIS::getHost);
+        registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
+        registry.add("dynamodb.endpoint",
+                () -> "http://" + DYNAMODB.getHost() + ":" + DYNAMODB.getMappedPort(8000));
+    }
+
+    @LocalServerPort
+    private int port;
+
+    @Autowired
+    private DynamoDbClient dynamoDbClient;
+
+    private final ObjectMapper json = new ObjectMapper();
+    private final HttpClient http = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+
+    private String token;
+    private String refreshToken;
+
+    @BeforeEach
+    void registerAndLogIn() throws Exception {
+        await().atMost(Duration.ofSeconds(30)).ignoreExceptions()
+                .until(() -> dynamoDbClient.describeTable(r -> r.tableName("url_mappings")) != null);
+
+        String username = "user" + UUID.randomUUID().toString().substring(0, 8);
+        Map<String, String> credentials = Map.of(
+                "username", username, "email", username + "@example.com", "password", "Password123!");
+        assertThat(post("/api/v1/auth/public/register", credentials, null).statusCode()).isEqualTo(200);
+
+        JsonNode tokens = data(post("/api/v1/auth/public/login",
+                Map.of("username", username, "password", "Password123!"), null));
+        token = tokens.get("token").asText();
+        refreshToken = tokens.get("refreshToken").asText();
+    }
+
+    @Test
+    void clickFlowsFromRedirectThroughKafkaToMongoAndDynamoDb() throws Exception {
+        JsonNode created = shorten("https://example.com/flow");
+        String code = created.get("shortUrl").asText();
+
+        HttpResponse<String> redirect = get("/" + code, null);
+        assertThat(redirect.statusCode()).isEqualTo(302);
+        assertThat(redirect.headers().firstValue("Location")).contains("https://example.com/flow");
+
+        String start = LocalDateTime.now().minusHours(1).toString();
+        String end = LocalDateTime.now().plusHours(1).toString();
+        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofSeconds(1)).untilAsserted(() -> {
+            JsonNode byDate = data(get("/api/v1/urls/analytics?shortUrl=" + code
+                    + "&startDate=" + start + "&endDate=" + end, token));
+            assertThat(byDate).hasSize(1);
+            assertThat(byDate.get(0).get("count").asLong()).isEqualTo(1);
+
+            JsonNode mapping = data(get("/api/v1/urls/" + created.get("id").asText(), token));
+            assertThat(mapping.get("clickCount").asInt()).isEqualTo(1);
+        });
+    }
+
+    @Test
+    void paginatesPastTheFirstPage() throws Exception {
+        for (int i = 0; i < 25; i++) {
+            shorten("https://example.com/page/" + i);
+        }
+
+        JsonNode first = data(get("/api/v1/urls/myurls?size=20", token));
+        assertThat(first.get("content")).hasSize(20);
+        assertThat(first.get("totalElements").asInt()).isEqualTo(25);
+        String cursor = first.get("nextCursor").asText();
+
+        JsonNode second = data(get("/api/v1/urls/myurls?size=20&cursor=" + cursor, token));
+        assertThat(second.get("content")).hasSize(5);
+        assertThat(second.get("nextCursor").isNull()).isTrue();
+    }
+
+    @Test
+    void stringIdsWorkForDeleteAndTheLinkStopsResolving() throws Exception {
+        JsonNode created = shorten("https://example.com/delete");
+        assertThat(created.get("id").isTextual()).isTrue();
+
+        HttpRequest delete = request("/api/v1/urls/" + created.get("id").asText(), token).DELETE().build();
+        assertThat(http.send(delete, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(200);
+
+        assertThat(get("/" + created.get("shortUrl").asText(), null).statusCode()).isEqualTo(404);
+    }
+
+    @Test
+    void missingTokenIsUnauthorized() throws Exception {
+        assertThat(get("/api/v1/urls/myurls", null).statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    void refreshRotatesTheTokenAndLogoutRevokesIt() throws Exception {
+        JsonNode rotated = data(post("/api/v1/auth/public/refresh", Map.of("refreshToken", refreshToken), null));
+        String newToken = rotated.get("refreshToken").asText();
+
+        assertThat(post("/api/v1/auth/public/refresh", Map.of("refreshToken", refreshToken), null).statusCode())
+                .isEqualTo(401);
+        assertThat(post("/api/v1/auth/logout", Map.of(), token).statusCode()).isEqualTo(200);
+        assertThat(post("/api/v1/auth/public/refresh", Map.of("refreshToken", newToken), null).statusCode())
+                .isEqualTo(401);
+    }
+
+    @Test
+    void malformedEventGoesToTheDeadLetterTopic() throws Exception {
+        byte[] marker = ("not json " + UUID.randomUUID()).getBytes(StandardCharsets.UTF_8);
+        try (KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(Map.of(
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class,
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class))) {
+            producer.send(new ProducerRecord<>("analytics-events", marker)).get();
+        }
+
+        try (KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(Map.of(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
+                ConsumerConfig.GROUP_ID_CONFIG, "dlt-test-" + UUID.randomUUID(),
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
+                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class,
+                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class))) {
+            consumer.subscribe(List.of("analytics-events-dlt"));
+            await().atMost(Duration.ofSeconds(30)).until(() -> {
+                ConsumerRecords<byte[], byte[]> records = consumer.poll(Duration.ofSeconds(1));
+                return !records.isEmpty();
+            });
+        }
+    }
+
+    private JsonNode shorten(String url) throws Exception {
+        return data(post("/api/v1/urls/shorten", Map.of("originalUrl", url), token));
+    }
+
+    private JsonNode data(HttpResponse<String> response) throws Exception {
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
+        return json.readTree(response.body()).get("data");
+    }
+
+    private HttpResponse<String> get(String path, String bearer) throws Exception {
+        return http.send(request(path, bearer).GET().build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> post(String path, Object body, String bearer) throws Exception {
+        HttpRequest request = request(path, bearer)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body)))
+                .build();
+        return http.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpRequest.Builder request(String path, String bearer) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path));
+        if (bearer != null) {
+            builder.header("Authorization", "Bearer " + bearer);
+        }
+        return builder;
+    }
+}

@@ -4,6 +4,7 @@ import com.Url_Shortener.dto.ApiResponse;
 import com.Url_Shortener.dto.ClickEventDetailDto;
 import com.Url_Shortener.dto.ClickEventDto;
 import com.Url_Shortener.dto.CreateShortUrlRequest;
+import com.Url_Shortener.dto.CursorPageDto;
 import com.Url_Shortener.dto.DashboardDto;
 import com.Url_Shortener.dto.UpdateUrlMappingRequest;
 import com.Url_Shortener.dto.UrlMappingDto;
@@ -11,9 +12,6 @@ import com.Url_Shortener.entity.User;
 import com.Url_Shortener.service.UrlMappingService;
 import com.Url_Shortener.service.UserService;
 import jakarta.validation.Valid;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -51,11 +49,20 @@ public class UrlMappingController {
 
     @GetMapping("/myurls")
     @PreAuthorize("hasRole('USER')")  //✅
-    public ResponseEntity<ApiResponse<Page<UrlMappingDto>>> getUserUrls(
+    public ResponseEntity<ApiResponse<CursorPageDto<UrlMappingDto>>> getUserUrls(
             Principal principal,
-            @PageableDefault(size = 20, sort = "createdDate") Pageable pageable){
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "desc") String direction){
+        if (size < 1 || size > 100) {
+            throw new IllegalArgumentException("size must be between 1 and 100");
+        }
+        if (!direction.equals("asc") && !direction.equals("desc")) {
+            throw new IllegalArgumentException("direction must be asc or desc");
+        }
         User user = userService.findByUsername(principal.getName());
-        Page<UrlMappingDto> urls = urlMappingService.getUrlsByUser(user, pageable);
+        CursorPageDto<UrlMappingDto> urls =
+                urlMappingService.getUrlsByUser(user, size, cursor, direction.equals("asc"));
         return ResponseEntity.ok(ApiResponse.success(urls));
     }
 

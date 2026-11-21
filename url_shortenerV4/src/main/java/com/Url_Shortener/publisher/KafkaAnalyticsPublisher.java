@@ -18,11 +18,10 @@ import org.springframework.stereotype.Service;
  * KafkaTemplate or KafkaProducer.
  *
  * ERROR HANDLING:
- * Fire-and-forget — all exceptions are caught and logged.
- * The redirect must return 302 immediately regardless of
- * whether Kafka is available. If Kafka is down, events are
- * lost (acceptable for analytics; the trade-off is redirect
- * latency vs. analytics completeness).
+ * Fire-and-forget — all exceptions are caught, logged and counted.
+ * If Kafka is down, events are lost (acceptable for analytics; the
+ * trade-off is redirect latency vs. analytics completeness). A send
+ * can block the caller for up to max.block.ms, set in KafkaConfig.
  *
  * STRUCTURED LOGGING:
  * Logs eventId on publish for traceability across the
@@ -44,13 +43,6 @@ public class KafkaAnalyticsPublisher implements AnalyticsPublisher {
         this.metrics = metrics;
     }
 
-    // OLD POSTGRES IMPLEMENTATION
-    // ClickEvent clickEvent = new ClickEvent();
-    // clickEvent.setClickDate(LocalDateTime.now());
-    // ...
-    // clickEventRepository.save(clickEvent);
-
-    // NEW KAFKA IMPLEMENTATION
     @Override
     public void publish(ClickEventCreatedEvent event) {
         var sample = metrics.startTimer();
@@ -58,9 +50,12 @@ public class KafkaAnalyticsPublisher implements AnalyticsPublisher {
             kafkaTemplate.send(TOPIC, event.getShortUrl(), event)
                     .whenComplete((result, ex) -> {
                         if (ex != null) {
+                            metrics.incrementKafkaPublishFailure();
                             log.warn("Event publish FAILED to Kafka: eventId={}, shortUrl={}, error={}",
                                     event.getEventId(), event.getShortUrl(), ex.getMessage());
                         } else {
+                            metrics.incrementKafkaPublished();
+                            metrics.stopKafkaPublishTime(sample);
                             log.debug("Event published to Kafka: eventId={}, shortUrl={}, topic={}, partition={}, offset={}",
                                     event.getEventId(), event.getShortUrl(),
                                     result.getRecordMetadata().topic(),
@@ -68,12 +63,9 @@ public class KafkaAnalyticsPublisher implements AnalyticsPublisher {
                                     result.getRecordMetadata().offset());
                         }
                     });
-            log.debug("Event sent to Kafka: eventId={}, shortUrl={}", event.getEventId(), event.getShortUrl());
-            metrics.incrementKafkaPublished();
-            metrics.stopKafkaPublishTime(sample);
         } catch (Exception e) {
             // FIRE-AND-FORGET: Never throw to caller.
-            // The redirect must not be delayed by Kafka failures.
+            metrics.incrementKafkaPublishFailure();
             log.warn("Failed to publish event to Kafka: eventId={}, shortUrl={}, error={}",
                     event.getEventId(), event.getShortUrl(), e.getMessage());
         }

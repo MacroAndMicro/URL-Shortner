@@ -13,6 +13,7 @@ import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import com.Url_Shortener.model.UrlMappingItem;
 
 import java.net.URI;
+import java.time.Duration;
 
 /**
  * ============================================================
@@ -43,6 +44,10 @@ public class DynamoDBConfig {
                 .credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create("dummy", "dummy")
                 ))
+                // Bounds how long a redirect can wait when DynamoDB is unreachable.
+                .overrideConfiguration(config -> config
+                        .apiCallAttemptTimeout(Duration.ofSeconds(2))
+                        .apiCallTimeout(Duration.ofSeconds(3)))
                 .build();
     }
 

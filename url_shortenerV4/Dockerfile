@@ -1,4 +1,4 @@
-FROM eclipse-temurin:21-jdk
+FROM eclipse-temurin:21-jdk AS build
 
 WORKDIR /app
 
@@ -8,10 +8,18 @@ RUN chmod +x mvnw
 
 RUN ./mvnw clean package -DskipTests
 
-EXPOSE 8080
-EXPOSE 5005
+FROM eclipse-temurin:21-jre
 
-ENTRYPOINT ["sh", "-c", "java -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 \
-    -Dspring.data.mongodb.uri=${SPRING_DATA_MONGODB_URI:-mongodb://mongodb:27017/urlshortener} \
-    -Dspring.kafka.bootstrap-servers=${SPRING_KAFKA_BOOTSTRAP_SERVERS:-kafka:9092} \
-    -jar target/Url_Shortener-0.0.1-SNAPSHOT.jar"]
+RUN useradd --system --no-create-home appuser
+
+WORKDIR /app
+
+COPY --from=build /app/target/Url_Shortener-0.0.1-SNAPSHOT.jar app.jar
+
+USER appuser
+
+EXPOSE 8080
+
+# Set JAVA_DEBUG_OPTS to enable remote debugging, for example:
+# -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
+ENTRYPOINT ["sh", "-c", "exec java ${JAVA_DEBUG_OPTS:-} -jar app.jar"]

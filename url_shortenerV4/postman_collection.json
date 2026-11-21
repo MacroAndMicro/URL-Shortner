@@ -299,8 +299,8 @@
           "request": {
             "method": "GET",
             "header": [{"key": "Authorization", "value": "Bearer {{jwtToken}}"}],
-            "url": {"raw": "{{baseUrl}}/api/v1/urls/myurls?page=0&size=10&sort=createdDate,desc", "host": ["{{baseUrl}}"], "path": ["api", "v1", "urls", "myurls"], "query": [
-              {"key": "page", "value": "0"}, {"key": "size", "value": "10"}, {"key": "sort", "value": "createdDate,desc"}
+            "url": {"raw": "{{baseUrl}}/api/v1/urls/myurls?size=10&direction=desc", "host": ["{{baseUrl}}"], "path": ["api", "v1", "urls", "myurls"], "query": [
+              {"key": "size", "value": "10"}, {"key": "direction", "value": "desc"}
             ]}
           }
         },
@@ -382,7 +382,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": {"raw": "{{baseUrl}}/shortUrl?shortUrl={{shortUrl}}", "host": ["{{baseUrl}}"], "path": ["shortUrl"], "query": [{"key": "shortUrl", "value": "{{shortUrl}}"}]}
+            "url": {"raw": "{{baseUrl}}/{{shortUrl}}", "host": ["{{baseUrl}}"], "path": ["{{shortUrl}}"]}
           }
         }
       ]

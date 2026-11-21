@@ -16,6 +16,9 @@ spring:
         format_sql: true
         dialect: org.hibernate.dialect.H2Dialect
 
+  flyway:
+    enabled: false
+
 jwt:
   secret: dGVzdC1zZWNyZXQta2V5LWZvci1qd3QtdGVzdGluZy1wdXJwb3Nlcy1vbmx5MTIzNA==
   expiration: 86400000

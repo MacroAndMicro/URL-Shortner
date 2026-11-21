@@ -1,0 +1,59 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [
+        { "expr": "rate(kafka_events_published_count_total[1m])", "legendFormat": "Published/sec" }
+      ],
+      "title": "Events Published",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "targets": [
+        { "expr": "rate(kafka_events_consumed_count_total[1m])", "legendFormat": "Consumed/sec" }
+      ],
+      "title": "Events Consumed",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "targets": [
+        { "expr": "rate(kafka_events_published_count_total[1m])", "legendFormat": "Published" },
+        { "expr": "rate(kafka_events_consumed_count_total[1m])", "legendFormat": "Consumed" }
+      ],
+      "title": "Publisher vs Consumer Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "targets": [
+        { "expr": "rate(kafka_events_deadletter_count_total[1m])", "legendFormat": "DLT Events/sec" }
+      ],
+      "title": "Dead Letter Events",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["url-shortener", "kafka"],
+  "title": "Kafka Events",
+  "uid": "kafka-events",
+  "version": 1
+}

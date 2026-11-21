@@ -39,4 +39,20 @@ public interface CacheService {
      * @param shortUrl the short URL key to evict
      */
     void evict(String shortUrl);
+
+    /**
+     * Records for a short time that a short URL does not exist, so repeated
+     * requests for unknown codes do not reach DynamoDB.
+     *
+     * @param shortUrl the short URL that was not found
+     */
+    void markMissing(String shortUrl);
+
+    /**
+     * Checks whether a short URL was recently found not to exist.
+     *
+     * @param shortUrl the short URL to check
+     * @return true if marked missing, false if not marked or on error
+     */
+    boolean isMarkedMissing(String shortUrl);
 }
