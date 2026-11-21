@@ -181,6 +181,9 @@ class UrlShortenerIT {
     void freeUsersGetCached301RedirectsAndNoAnalytics() throws Exception {
         JsonNode created = shorten("https://example.com/free");
         assertThat(created.get("expiresAt").isNull()).isFalse();
+        // Times carry their zone offset, so browsers in other zones read them correctly.
+        assertThat(created.get("createdDate").asText()).matches(".*T.*(Z|[+-]\\d\\d:\\d\\d)");
+        assertThat(created.get("editableUntil").asText()).isNotEmpty();
 
         HttpResponse<String> redirect = get("/" + created.get("shortUrl").asText(), null);
         assertThat(redirect.statusCode()).isEqualTo(301);

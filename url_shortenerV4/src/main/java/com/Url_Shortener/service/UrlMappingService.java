@@ -312,6 +312,9 @@ public class UrlMappingService {
         dto.setCreatedDate(parse(item.getCreatedDate()));
         dto.setUsername(item.getOwnerUsername());
         dto.setExpiresAt(expiresAt(item, owner));
+        Duration editWindow = owner.effective().editWindow();
+        dto.setEditableUntil(editWindow != null && dto.getCreatedDate() != null
+                ? dto.getCreatedDate().plus(editWindow) : null);
         return dto;
     }
 
@@ -592,7 +595,7 @@ public class UrlMappingService {
         LocalDateTime todayEnd = todayStart.plusDays(1);
         long clicksToday = analyticsStorage.countByShortUrlsAndDateBetween(shortUrls, todayStart, todayEnd);
 
-        LocalDateTime weekStart = todayStart.minusDays(7);
+        LocalDateTime weekStart = todayStart.minusDays(6); // the last 7 days, today included
         long clicksThisWeek = analyticsStorage.countByShortUrlsAndDateBetween(shortUrls, weekStart, todayEnd);
 
         List<UrlMappingDto> topUrls = topByTotalClicks(userUrls, 5, status);

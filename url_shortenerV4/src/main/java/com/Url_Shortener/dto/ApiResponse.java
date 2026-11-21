@@ -1,7 +1,6 @@
 package com.Url_Shortener.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import java.time.LocalDateTime;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ApiResponse<T> {
@@ -14,7 +13,7 @@ public class ApiResponse<T> {
         this.status = status;
         this.data = data;
         this.message = message;
-        this.timestamp = LocalDateTime.now().toString();
+        this.timestamp = java.time.OffsetDateTime.now().toString();
     }
 
     public static <T> ApiResponse<T> success(T data) {

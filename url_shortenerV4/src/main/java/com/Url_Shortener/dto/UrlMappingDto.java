@@ -15,6 +15,16 @@ public class UrlMappingDto {
     private String username;
     /** When the link stops working; null if it never expires. */
     private LocalDateTime expiresAt;
+    /** Until when the destination can be changed; null if any time. */
+    private LocalDateTime editableUntil;
+
+    public LocalDateTime getEditableUntil() {
+        return editableUntil;
+    }
+
+    public void setEditableUntil(LocalDateTime editableUntil) {
+        this.editableUntil = editableUntil;
+    }
 
     public LocalDateTime getExpiresAt() {
         return expiresAt;
