@@ -1,6 +1,7 @@
 <button
   (click)="theme.toggle()"
-  class="p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors duration-150"
+  type="button"
+  class="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
   [attr.aria-label]="theme.isDark() ? 'Switch to light mode' : 'Switch to dark mode'"
 >
   @if (theme.isDark()) {

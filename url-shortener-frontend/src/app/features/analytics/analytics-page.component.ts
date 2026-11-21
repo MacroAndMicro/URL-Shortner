@@ -215,7 +215,7 @@ export class AnalyticsPageComponent implements OnInit, OnDestroy {
           labels: clickData.map(c => c.clickDate),
           datasets: [{ data: clickData.map(c => c.count), borderColor: '#EE6123', backgroundColor: 'rgba(238,97,35,0.08)', fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#EE6123', borderWidth: 2 }],
         },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { color: textColor } }, y: { grid: { color: gridColor }, ticks: { color: textColor } } } },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { color: textColor } }, y: { beginAtZero: true, suggestedMax: 5, grid: { color: gridColor }, ticks: { precision: 0, color: textColor } } } },
       }));
     }
 
@@ -241,7 +241,7 @@ export class AnalyticsPageComponent implements OnInit, OnDestroy {
           labels: browsers.map(([name]) => name),
           datasets: [{ data: browsers.map(([, n]) => n), backgroundColor: ['#2D4A7A', '#EE6123', '#10B981', '#8B5CF6'], borderRadius: 6 }],
         },
-        options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { color: gridColor }, ticks: { color: textColor } }, y: { grid: { display: false }, ticks: { color: textColor } } } },
+        options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, grid: { color: gridColor }, ticks: { precision: 0, color: textColor } }, y: { grid: { display: false }, ticks: { color: textColor } } } },
       }));
     }
   }

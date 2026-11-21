@@ -86,7 +86,7 @@ Chart.register(...registerables);
           <div class="card rounded-2xl">
             <h3 class="text-h3 mb-4 text-navy-900 dark:text-white">Top Performing Links</h3>
             <div class="overflow-x-auto">
-              <table class="w-full text-sm">
+              <table class="w-full text-sm [&_td]:px-3 [&_th]:px-3 [&_td:first-child]:pl-0 [&_th:first-child]:pl-0 [&_td:last-child]:pr-0 [&_th:last-child]:pr-0">
                 <thead>
                   <tr class="border-b border-gray-100 dark:border-slate-700 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                     <th class="pb-3">Short URL</th><th class="pb-3 hidden sm:table-cell">Original</th><th class="pb-3 text-right">Clicks</th><th class="pb-3 text-right"></th>
@@ -183,7 +183,8 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
         },
         scales: {
           x: { grid: { display: false }, ticks: { color: isDark ? '#94A3B8' : '#6B7280' } },
-          y: { grid: { color: isDark ? '#334155' : '#E5E7EB' }, ticks: { color: isDark ? '#94A3B8' : '#6B7280' } },
+          // Click counts: whole numbers from zero, with room above a flat line of zeros.
+          y: { beginAtZero: true, suggestedMax: 5, grid: { color: isDark ? '#334155' : '#E5E7EB' }, ticks: { precision: 0, color: isDark ? '#94A3B8' : '#6B7280' } },
         },
       },
     };

@@ -50,7 +50,7 @@ import { environment } from '../../environments/environment';
         </div>
       } @else {
         <div class="card rounded-2xl overflow-x-auto">
-          <table class="w-full text-sm">
+          <table class="w-full text-sm [&_td]:px-3 [&_th]:px-3 [&_td:first-child]:pl-0 [&_th:first-child]:pl-0 [&_td:last-child]:pr-0 [&_th:last-child]:pr-0">
             <thead>
               <tr class="border-b border-gray-100 dark:border-slate-700 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                 <th class="pb-3">Short URL</th><th class="pb-3 hidden sm:table-cell">Original</th>@if (showClicks()) {<th class="pb-3 text-right">Clicks</th>}<th class="pb-3 hidden sm:table-cell">Created</th>@if (!showClicks()) {<th class="pb-3">Expires</th>}<th class="pb-3 text-right">Actions</th>

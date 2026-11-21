@@ -1,58 +1,56 @@
-<nav class="bg-navy-900 sticky top-0 z-50 shadow-nav border-b border-navy-500/20">
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="flex justify-between h-16 items-center">
-      <a routerLink="/" class="flex items-center gap-2.5 shrink-0">
-        <div class="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
-        </div>
-        <span class="text-xl font-bold text-white tracking-tight">ShortLink</span>
-      </a>
+<nav class="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
+  <div class="section flex h-16 items-center justify-between gap-4">
+    <a routerLink="/" class="flex shrink-0 items-center gap-2.5" aria-label="ShortLink home">
+      <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-500">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+      </span>
+      <span class="text-lg font-bold tracking-tight text-navy-900 dark:text-white">ShortLink</span>
+    </a>
 
-      <!-- Desktop nav -->
-      <div class="hidden md:flex md:items-center md:gap-1">
-        @if (auth.isAuthenticated()) {
-          <a routerLink="/dashboard" routerLinkActive="!text-white !bg-white/10" class="btn-ghost">Dashboard</a>
-          <a routerLink="/urls/create" routerLinkActive="!text-white !bg-white/10" class="btn-ghost">Create</a>
-          <a routerLink="/urls" routerLinkActive="!text-white !bg-white/10" class="btn-ghost">My URLs</a>
-          <a routerLink="/plan" routerLinkActive="!text-white !bg-white/10" class="btn-ghost">Plan</a>
-          <div class="w-px h-5 bg-white/20 mx-2"></div>
-          <button (click)="auth.logout().subscribe()" class="btn-ghost text-white/50">Logout</button>
-        } @else {
-          <a routerLink="/login" class="btn-ghost">Login</a>
-          <a routerLink="/register" class="ml-2 btn-accent text-sm">Sign Up Free</a>
-        }
-        <app-theme-toggle />
-      </div>
-
-      <!-- Mobile toggle -->
-      <div class="flex items-center gap-2 md:hidden">
-        <app-theme-toggle />
-        <button (click)="mobileOpen.set(!mobileOpen())" class="p-2 text-white/70 hover:text-white">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            @if (mobileOpen()) {
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            } @else {
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-            }
-          </svg>
-        </button>
-      </div>
+    <!-- Desktop -->
+    <div class="hidden items-center gap-1 md:flex">
+      @if (auth.isAuthenticated()) {
+        <a routerLink="/dashboard" routerLinkActive="!text-orange-600 dark:!text-orange-400" class="btn-ghost">Dashboard</a>
+        <a routerLink="/urls/create" routerLinkActive="!text-orange-600 dark:!text-orange-400" class="btn-ghost">Create</a>
+        <a routerLink="/urls" [routerLinkActiveOptions]="{ exact: true }" routerLinkActive="!text-orange-600 dark:!text-orange-400" class="btn-ghost">My URLs</a>
+        <a routerLink="/plan" routerLinkActive="!text-orange-600 dark:!text-orange-400" class="btn-ghost">Plan</a>
+        <span class="mx-2 h-5 w-px bg-slate-200 dark:bg-slate-700" aria-hidden="true"></span>
+        <button type="button" (click)="auth.logout().subscribe()" class="btn-ghost">Log out</button>
+      } @else {
+        <a routerLink="/login" class="btn-ghost">Log in</a>
+        <a routerLink="/register" class="btn-accent ml-1">Sign up free</a>
+      }
+      <app-theme-toggle />
     </div>
 
-    <!-- Mobile menu -->
-    @if (mobileOpen()) {
-      <div class="md:hidden border-t border-white/10 py-3 space-y-1 animate-slide-in-right">
-        @if (auth.isAuthenticated()) {
-          <a routerLink="/dashboard" class="block btn-ghost w-full text-left" (click)="mobileOpen.set(false)">Dashboard</a>
-          <a routerLink="/urls/create" class="block btn-ghost w-full text-left" (click)="mobileOpen.set(false)">Create</a>
-          <a routerLink="/urls" class="block btn-ghost w-full text-left" (click)="mobileOpen.set(false)">My URLs</a>
-          <a routerLink="/plan" class="block btn-ghost w-full text-left" (click)="mobileOpen.set(false)">Plan</a>
-          <button (click)="auth.logout().subscribe(); mobileOpen.set(false)" class="block btn-ghost w-full text-left text-white/50">Logout</button>
-        } @else {
-          <a routerLink="/login" class="block btn-ghost w-full text-left" (click)="mobileOpen.set(false)">Login</a>
-          <a routerLink="/register" class="block w-full mt-1 btn-accent text-center" (click)="mobileOpen.set(false)">Sign Up Free</a>
-        }
-      </div>
-    }
+    <!-- Mobile -->
+    <div class="flex items-center gap-1 md:hidden">
+      <app-theme-toggle />
+      <button type="button" (click)="mobileOpen.set(!mobileOpen())" class="btn-ghost !px-2"
+              [attr.aria-expanded]="mobileOpen()" aria-controls="mobile-menu" aria-label="Menu">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          @if (mobileOpen()) {
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          } @else {
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+          }
+        </svg>
+      </button>
+    </div>
   </div>
+
+  @if (mobileOpen()) {
+    <div id="mobile-menu" class="section space-y-1 border-t border-slate-200 py-3 md:hidden dark:border-slate-800">
+      @if (auth.isAuthenticated()) {
+        <a routerLink="/dashboard" class="btn-ghost w-full !justify-start" (click)="mobileOpen.set(false)">Dashboard</a>
+        <a routerLink="/urls/create" class="btn-ghost w-full !justify-start" (click)="mobileOpen.set(false)">Create</a>
+        <a routerLink="/urls" class="btn-ghost w-full !justify-start" (click)="mobileOpen.set(false)">My URLs</a>
+        <a routerLink="/plan" class="btn-ghost w-full !justify-start" (click)="mobileOpen.set(false)">Plan</a>
+        <button type="button" (click)="auth.logout().subscribe(); mobileOpen.set(false)" class="btn-ghost w-full !justify-start">Log out</button>
+      } @else {
+        <a routerLink="/login" class="btn-ghost w-full !justify-start" (click)="mobileOpen.set(false)">Log in</a>
+        <a routerLink="/register" class="btn-accent w-full" (click)="mobileOpen.set(false)">Sign up free</a>
+      }
+    </div>
+  }
 </nav>
