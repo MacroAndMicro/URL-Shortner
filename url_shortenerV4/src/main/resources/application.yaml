@@ -88,6 +88,15 @@ app:
     slow-call: 2s
     redis-slow-call: 300ms
     kafka-slow-call: 500ms
+  # Sign in with Google / GitHub. A provider is enabled only when both its id
+  # and secret are set; see docs/oauth-setup.md for how to get them.
+  oauth:
+    google:
+      client-id: ${GOOGLE_CLIENT_ID:}
+      client-secret: ${GOOGLE_CLIENT_SECRET:}
+    github:
+      client-id: ${GITHUB_CLIENT_ID:}
+      client-secret: ${GITHUB_CLIENT_SECRET:}
   mongodb:
     server-selection-timeout: 2s
     connect-timeout: 2s

@@ -98,6 +98,19 @@ public class UserService {
         );
     }
 
+    /**
+     * Signs in the user a Google/GitHub sign-in code was issued for: the same
+     * access and refresh tokens as a password login.
+     */
+    public JwtAuthenticationResponse issueTokens(Long userId) {
+        User user = userRepository.findById(userId).orElseThrow(
+                () -> new UsernameNotFoundException("User not found"));
+        String jwt = jwtUtils.generateToken(UserDetailsImpl.build(user));
+        String refreshToken = refreshTokenService.createRefreshToken(user.getUsername()).token();
+        metrics.incrementAuthLoginSuccess();
+        return new JwtAuthenticationResponse(jwt, refreshToken);
+    }
+
     public JwtAuthenticationResponse refreshToken(String refreshTokenValue) {
         metrics.incrementAuthRefresh();
         RefreshTokenService.IssuedRefreshToken newRefreshToken = refreshTokenService.verifyAndRotate(refreshTokenValue);

@@ -64,6 +64,16 @@ class UrlShortenerIT {
             .withCommand("-jar DynamoDBLocal.jar -sharedDb -inMemory")
             .withExposedPorts(8000);
 
+    /** A fake Google: an OpenID Connect server whose login form lets each test pick the account. */
+    @Container
+    static final GenericContainer<?> FAKE_GOOGLE = new GenericContainer<>("ghcr.io/navikt/mock-oauth2-server:2.2.1")
+            .withEnv("JSON_CONFIG", "{\"interactiveLogin\": true}")
+            .withExposedPorts(8080);
+
+    private static String fakeGoogle(String path) {
+        return "http://localhost:" + FAKE_GOOGLE.getMappedPort(8080) + "/default" + path;
+    }
+
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
@@ -86,6 +96,13 @@ class UrlShortenerIT {
         registry.add("app.circuit-breaker.window-size", () -> "4");
         registry.add("app.circuit-breaker.minimum-calls", () -> "2");
         registry.add("app.circuit-breaker.open-duration", () -> "3s");
+        registry.add("app.oauth.google.client-id", () -> "it-client");
+        registry.add("app.oauth.google.client-secret", () -> "it-secret");
+        registry.add("app.oauth.google.authorization-uri", () -> fakeGoogle("/authorize"));
+        registry.add("app.oauth.google.token-uri", () -> fakeGoogle("/token"));
+        registry.add("app.oauth.google.jwk-set-uri", () -> fakeGoogle("/jwks"));
+        registry.add("app.oauth.google.user-info-uri", () -> fakeGoogle("/userinfo"));
+        registry.add("app.oauth.google.issuer-uri", () -> fakeGoogle(""));
         registry.add("dynamodb.endpoint",
                 () -> "http://" + DYNAMODB.getHost() + ":" + DYNAMODB.getMappedPort(8000));
     }
@@ -384,6 +401,96 @@ class UrlShortenerIT {
 
     private JsonNode shorten(String url) throws Exception {
         return data(post("/api/v1/urls/shorten", Map.of("originalUrl", url), token));
+    }
+
+    // ============================================================
+    // SIGN IN WITH GOOGLE (against FAKE_GOOGLE)
+    // ============================================================
+
+    @Test
+    void googleSignInCreatesAnAccountAndSignsBackIntoIt() throws Exception {
+        assertThat(data(get("/api/v1/auth/public/oauth/providers", null)).toString()).contains("google");
+        String sub = "google-" + UUID.randomUUID();
+
+        JsonNode first = data(exchange(googleSignIn(sub, sub + "@example.com", true)));
+        JsonNode me = data(get("/api/v1/auth/me", first.get("token").asText()));
+        JsonNode again = data(exchange(googleSignIn(sub, sub + "@example.com", true)));
+        JsonNode meAgain = data(get("/api/v1/auth/me", again.get("token").asText()));
+
+        assertThat(meAgain.get("id").asLong()).isEqualTo(me.get("id").asLong());
+        assertThat(me.get("email").asText()).isEqualTo(sub + "@example.com");
+        assertThat(data(get("/api/v1/account/plan", first.get("token").asText())).get("effectivePlan").asText())
+                .isEqualTo("FREE");
+    }
+
+    @Test
+    void aVerifiedGoogleEmailSignsIntoTheExistingPasswordAccount() throws Exception {
+        String email = data(get("/api/v1/auth/me", token)).get("email").asText();
+
+        JsonNode tokens = data(exchange(googleSignIn("google-" + UUID.randomUUID(), email, true)));
+
+        assertThat(data(get("/api/v1/auth/me", tokens.get("token").asText())).get("email").asText()).isEqualTo(email);
+    }
+
+    @Test
+    void anUnverifiedGoogleEmailGetsASeparateAccount() throws Exception {
+        JsonNode mine = data(get("/api/v1/auth/me", token));
+
+        JsonNode tokens = data(exchange(googleSignIn("google-" + UUID.randomUUID(), mine.get("email").asText(), false)));
+        JsonNode other = data(get("/api/v1/auth/me", tokens.get("token").asText()));
+
+        assertThat(other.get("id").asLong()).isNotEqualTo(mine.get("id").asLong());
+        assertThat(other.get("email").asText()).endsWith("@users.noreply.shortlink.invalid");
+    }
+
+    @Test
+    void aSignInCodeWorksOnlyOnce() throws Exception {
+        String code = googleSignIn("google-" + UUID.randomUUID(), "once@example.com", true);
+
+        assertThat(exchange(code).statusCode()).isEqualTo(200);
+        assertThat(exchange(code).statusCode()).isEqualTo(401);
+        assertThat(exchange("made-up").statusCode()).isEqualTo(401);
+    }
+
+    /**
+     * Acts as the browser through a Google sign-in and returns the one-time
+     * code the backend hands to the frontend.
+     */
+    private String googleSignIn(String subject, String email, boolean emailVerified) throws Exception {
+        HttpClient browser = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .cookieHandler(new java.net.CookieManager())
+                .build();
+
+        // 1. Start at the backend, which sends the browser to Google.
+        HttpResponse<String> start = browser.send(HttpRequest.newBuilder(
+                URI.create("http://localhost:" + port + "/oauth2/authorization/google")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(start.statusCode()).isEqualTo(302);
+        String authorize = start.headers().firstValue("Location").orElseThrow();
+        assertThat(authorize).startsWith(fakeGoogle("/authorize"));
+
+        // 2. Log in at "Google" as the chosen account.
+        String claims = json.writeValueAsString(Map.of("email", email, "email_verified", emailVerified));
+        String form = "username=" + java.net.URLEncoder.encode(subject, StandardCharsets.UTF_8)
+                + "&claims=" + java.net.URLEncoder.encode(claims, StandardCharsets.UTF_8);
+        HttpResponse<String> login = browser.send(HttpRequest.newBuilder(URI.create(authorize))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString(form)).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(login.statusCode()).as(login.body()).isEqualTo(302);
+
+        // 3. "Google" sends the browser back to the backend, which redirects to the frontend with a code.
+        HttpResponse<String> back = browser.send(HttpRequest.newBuilder(
+                URI.create(login.headers().firstValue("Location").orElseThrow())).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(back.statusCode()).isEqualTo(302);
+        String toFrontend = back.headers().firstValue("Location").orElseThrow();
+        assertThat(toFrontend).as("redirect to frontend").contains("/auth/callback?code=");
+        return toFrontend.substring(toFrontend.indexOf("code=") + 5);
+    }
+
+    private HttpResponse<String> exchange(String code) throws Exception {
+        return post("/api/v1/auth/public/oauth/exchange", Map.of("code", code), null);
     }
 
     private JsonNode changePlan(String plan) throws Exception {

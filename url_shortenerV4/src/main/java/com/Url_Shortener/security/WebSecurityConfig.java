@@ -5,7 +5,11 @@ import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import com.Url_Shortener.oauth.GitHubOAuth2UserService;
+import com.Url_Shortener.oauth.OAuthLoginHandlers;
+import com.Url_Shortener.oauth.OAuthProviders;
 import com.Url_Shortener.shortcode.ShortCode;
+import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -53,7 +57,11 @@ public class WebSecurityConfig {
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    // The OAuth beans are method parameters, not constructor ones: they need the
+    // PasswordEncoder defined in this class, which would otherwise be a cycle.
+    public SecurityFilterChain filterChain(HttpSecurity http, OAuthProviders oauthProviders,
+                                           OAuthLoginHandlers oauthHandlers,
+                                           GitHubOAuth2UserService gitHubUserService) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
                 // Applied here as well so 401 responses carry CORS headers the frontend can read.
                 .cors(Customizer.withDefaults())
@@ -65,6 +73,8 @@ public class WebSecurityConfig {
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/v1/auth/public/**").permitAll()
+                        // Google/GitHub sign-in: start (/oauth2/authorization/{provider}) and return.
+                        .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
                         .requestMatchers("/api/v1/health").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/guest/shorten").permitAll()
                         // Actuator is served on management.server.port, which is not published.
@@ -73,6 +83,16 @@ public class WebSecurityConfig {
                         .requestMatchers(HttpMethod.GET, ShortCode.PATH_PATTERN).permitAll()
                         .anyRequest().authenticated()
                 );
+        if (oauthProviders.any()) {
+            // Spring Security keeps the sign-in in progress in a short HTTP session
+            // (the app is otherwise stateless); OAuthLoginHandlers ends it.
+            http.oauth2Login(oauth -> oauth
+                    .clientRegistrationRepository(
+                            new InMemoryClientRegistrationRepository(oauthProviders.registrations()))
+                    .userInfoEndpoint(userInfo -> userInfo.userService(gitHubUserService))
+                    .successHandler(oauthHandlers)
+                    .failureHandler(oauthHandlers));
+        }
         http.authenticationProvider(authenticationProvider());
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
