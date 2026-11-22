@@ -1,6 +1,9 @@
 package com.Url_Shortener.security;
 
+import com.Url_Shortener.resilience.Breakers;
+import com.Url_Shortener.resilience.Guarded;
 import com.Url_Shortener.shortcode.ShortCode;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -35,15 +38,18 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final long authLimit;
     private final long shortenLimit;
     private final long redirectLimit;
+    private final Guarded redis;
 
     public RateLimitFilter(StringRedisTemplate redisTemplate,
                            @Value("${app.rate-limit.auth-per-minute:20}") long authLimit,
                            @Value("${app.rate-limit.shorten-per-minute:60}") long shortenLimit,
-                           @Value("${app.rate-limit.redirect-per-minute:600}") long redirectLimit) {
+                           @Value("${app.rate-limit.redirect-per-minute:600}") long redirectLimit,
+                           CircuitBreakerRegistry breakers) {
         this.redisTemplate = redisTemplate;
         this.authLimit = authLimit;
         this.shortenLimit = shortenLimit;
         this.redirectLimit = redirectLimit;
+        this.redis = new Guarded(breakers.circuitBreaker(Breakers.REDIS), log);
     }
 
     @Override
@@ -78,16 +84,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private boolean isOverLimit(String scope, HttpServletRequest request, long limit) {
         long window = Instant.now().getEpochSecond() / WINDOW.toSeconds();
         String key = "rate:" + scope + ":" + request.getRemoteAddr() + ":" + window;
-        try {
-            Long count = redisTemplate.opsForValue().increment(key);
-            if (count != null && count == 1) {
+        // If Redis is unavailable the request is allowed rather than refused.
+        Long count = redis.callOr("Rate limit check", () -> {
+            Long n = redisTemplate.opsForValue().increment(key);
+            if (n != null && n == 1) {
                 redisTemplate.expire(key, WINDOW.multipliedBy(2));
             }
-            return count != null && count > limit;
-        } catch (Exception e) {
-            log.warn("Rate limit check failed, allowing request: {}", e.getMessage());
-            return false;
-        }
+            return n;
+        }, null);
+        return count != null && count > limit;
     }
 
     private void reject(HttpServletResponse response) {

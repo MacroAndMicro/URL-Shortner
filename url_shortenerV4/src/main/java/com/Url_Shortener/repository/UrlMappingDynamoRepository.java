@@ -1,6 +1,10 @@
 package com.Url_Shortener.repository;
 
 import com.Url_Shortener.model.UrlMappingItem;
+import com.Url_Shortener.resilience.Breakers;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -17,6 +21,7 @@ import software.amazon.awssdk.services.dynamodb.model.Projection;
 import software.amazon.awssdk.services.dynamodb.model.ProjectionType;
 
 import java.util.*;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -41,14 +46,43 @@ public class UrlMappingDynamoRepository {
 
     private final DynamoDbTable<UrlMappingItem> urlMappingTable;
     private final DynamoDbClient dynamoDbClient;
+    private final CircuitBreaker breaker;
 
     @Value("${dynamodb.table-name:url_mappings}")
     private String tableName;
 
+    @Autowired
+    public UrlMappingDynamoRepository(DynamoDbTable<UrlMappingItem> urlMappingTable,
+                                      DynamoDbClient dynamoDbClient,
+                                      CircuitBreakerRegistry breakers) {
+        this.urlMappingTable = urlMappingTable;
+        this.dynamoDbClient = dynamoDbClient;
+        this.breaker = breakers.circuitBreaker(Breakers.DYNAMODB);
+    }
+
+    /** Without a circuit breaker; for tests and the in-memory repository. */
     public UrlMappingDynamoRepository(DynamoDbTable<UrlMappingItem> urlMappingTable,
                                       DynamoDbClient dynamoDbClient) {
         this.urlMappingTable = urlMappingTable;
         this.dynamoDbClient = dynamoDbClient;
+        this.breaker = null;
+    }
+
+    /**
+     * Runs a request-path call through the "dynamodb" circuit breaker. While
+     * it is open the call fails at once with CallNotPermittedException (503)
+     * instead of waiting for the DynamoDB timeout.
+     */
+    private <T> T dynamo(Supplier<T> call) {
+        return breaker != null ? breaker.executeSupplier(call) : call.get();
+    }
+
+    private void dynamoRun(Runnable call) {
+        if (breaker != null) {
+            breaker.executeRunnable(call);
+        } else {
+            call.run();
+        }
     }
 
     /**
@@ -280,8 +314,10 @@ public class UrlMappingDynamoRepository {
      * Saves (creates or updates) a URL mapping item.
      */
     public UrlMappingItem save(UrlMappingItem item) {
-        urlMappingTable.putItem(item);
-        return item;
+        return dynamo(() -> {
+            urlMappingTable.putItem(item);
+            return item;
+        });
     }
 
     /**
@@ -289,17 +325,19 @@ public class UrlMappingDynamoRepository {
      * Returns true if the item was saved, false if shortUrl already exists.
      */
     public boolean saveIfNotExists(UrlMappingItem item) {
-        try {
-            urlMappingTable.putItem(PutItemEnhancedRequest.builder(UrlMappingItem.class)
-                    .item(item)
-                    .conditionExpression(Expression.builder()
-                            .expression("attribute_not_exists(shortUrl)")
-                            .build())
-                    .build());
-            return true;
-        } catch (ConditionalCheckFailedException e) {
-            return false;
-        }
+        return dynamo(() -> {
+            try {
+                urlMappingTable.putItem(PutItemEnhancedRequest.builder(UrlMappingItem.class)
+                        .item(item)
+                        .conditionExpression(Expression.builder()
+                                .expression("attribute_not_exists(shortUrl)")
+                                .build())
+                        .build());
+                return true;
+            } catch (ConditionalCheckFailedException e) {
+                return false;
+            }
+        });
     }
 
     // ============================================================
@@ -310,9 +348,11 @@ public class UrlMappingDynamoRepository {
      * Finds a URL mapping by its short URL (partition key lookup).
      */
     public Optional<UrlMappingItem> findByShortUrl(String shortUrl) {
-        Key key = Key.builder().partitionValue(shortUrl).build();
-        UrlMappingItem item = urlMappingTable.getItem(key);
-        return Optional.ofNullable(item);
+        return dynamo(() -> {
+            Key key = Key.builder().partitionValue(shortUrl).build();
+            UrlMappingItem item = urlMappingTable.getItem(key);
+            return Optional.ofNullable(item);
+        });
     }
 
     /**
@@ -332,15 +372,17 @@ public class UrlMappingDynamoRepository {
      * Finds all URL mappings belonging to a user, sorted by createdDate (newest first).
      */
     public List<UrlMappingItem> findByOwnerId(Long ownerId) {
-        QueryConditional condition = QueryConditional.keyEqualTo(
-                Key.builder().partitionValue(ownerId).build()
-        );
-        return urlMappingTable.index("ownerId-index")
-                .query(r -> r.queryConditional(condition)
-                        .scanIndexForward(false))  // newest first
-                .stream()
-                .flatMap(page -> page.items().stream())
-                .collect(Collectors.toList());
+        return dynamo(() -> {
+            QueryConditional condition = QueryConditional.keyEqualTo(
+                    Key.builder().partitionValue(ownerId).build()
+            );
+            return urlMappingTable.index("ownerId-index")
+                    .query(r -> r.queryConditional(condition)
+                            .scanIndexForward(false))  // newest first
+                    .stream()
+                    .flatMap(page -> page.items().stream())
+                    .collect(Collectors.toList());
+        });
     }
 
     /**
@@ -365,43 +407,45 @@ public class UrlMappingDynamoRepository {
                                                                     boolean ascending,
                                                                     String createdAfter,
                                                                     String notExpiredAt) {
-        var iterable = urlMappingTable.index("ownerId-index")
-                .query(r -> {
-                    r.queryConditional(ownerCondition(ownerId, createdAfter))
-                            .limit(pageSize)
-                            .scanIndexForward(ascending);
-                    if (notExpiredAt != null) {
-                        r.filterExpression(Expression.builder()
-                                .expression("attribute_not_exists(expiresAt) OR expiresAt > :now")
-                                .putExpressionValue(":now", AttributeValue.builder().s(notExpiredAt).build())
-                                .build());
-                    }
-                    if (lastEvaluatedKey != null && !lastEvaluatedKey.isEmpty()) {
-                        r.exclusiveStartKey(toExclusiveStartKey(ownerId, lastEvaluatedKey));
-                    }
-                });
-
-        Iterator<Page<UrlMappingItem>> iterator = iterable.iterator();
-        if (!iterator.hasNext()) {
-            return new DynamoPageResult<>(Collections.emptyList(), null);
-        }
-
-        Page<UrlMappingItem> page = iterator.next();
-        List<UrlMappingItem> items = new ArrayList<>(page.items());
-
-        Map<String, String> nextKey = null;
-        if (page.lastEvaluatedKey() != null && !page.lastEvaluatedKey().isEmpty()) {
-            // Keep only the string attributes. ownerId is numeric and is
-            // restored from the authenticated user on the next request.
-            nextKey = page.lastEvaluatedKey().entrySet().stream()
-                    .filter(e -> e.getValue().s() != null)
-                    .collect(Collectors.toMap(
-                            Map.Entry::getKey,
-                            e -> e.getValue().s()
-                    ));
-        }
-
-        return new DynamoPageResult<>(items, nextKey);
+        return dynamo(() -> {
+            var iterable = urlMappingTable.index("ownerId-index")
+                    .query(r -> {
+                        r.queryConditional(ownerCondition(ownerId, createdAfter))
+                                .limit(pageSize)
+                                .scanIndexForward(ascending);
+                        if (notExpiredAt != null) {
+                            r.filterExpression(Expression.builder()
+                                    .expression("attribute_not_exists(expiresAt) OR expiresAt > :now")
+                                    .putExpressionValue(":now", AttributeValue.builder().s(notExpiredAt).build())
+                                    .build());
+                        }
+                        if (lastEvaluatedKey != null && !lastEvaluatedKey.isEmpty()) {
+                            r.exclusiveStartKey(toExclusiveStartKey(ownerId, lastEvaluatedKey));
+                        }
+                    });
+    
+            Iterator<Page<UrlMappingItem>> iterator = iterable.iterator();
+            if (!iterator.hasNext()) {
+                return new DynamoPageResult<>(Collections.emptyList(), null);
+            }
+    
+            Page<UrlMappingItem> page = iterator.next();
+            List<UrlMappingItem> items = new ArrayList<>(page.items());
+    
+            Map<String, String> nextKey = null;
+            if (page.lastEvaluatedKey() != null && !page.lastEvaluatedKey().isEmpty()) {
+                // Keep only the string attributes. ownerId is numeric and is
+                // restored from the authenticated user on the next request.
+                nextKey = page.lastEvaluatedKey().entrySet().stream()
+                        .filter(e -> e.getValue().s() != null)
+                        .collect(Collectors.toMap(
+                                Map.Entry::getKey,
+                                e -> e.getValue().s()
+                        ));
+            }
+    
+            return new DynamoPageResult<>(items, nextKey);
+        });
     }
 
     /** ownerId-index condition, narrowed by the createdDate sort key when given. */
@@ -446,10 +490,12 @@ public class UrlMappingDynamoRepository {
     public List<UrlMappingItem> findByOwnerAndOriginalUrl(Long ownerId, String originalUrl) {
         QueryConditional condition = QueryConditional.keyEqualTo(
                 Key.builder().partitionValue(UrlMappingItem.ownerUrlKey(ownerId, originalUrl)).build());
-        return urlMappingTable.index(OWNER_URL_INDEX)
+        List<UrlMappingItem> matches = dynamo(() -> urlMappingTable.index(OWNER_URL_INDEX)
                 .query(r -> r.queryConditional(condition))
                 .stream()
                 .flatMap(page -> page.items().stream())
+                .toList());
+        return matches.stream()
                 .map(keys -> findByShortUrl(keys.getShortUrl()))
                 .flatMap(Optional::stream)
                 // Guards against an index entry that lags an edit or delete.
@@ -466,14 +512,16 @@ public class UrlMappingDynamoRepository {
      * Finds a URL mapping by its numeric ID using the id-index GSI.
      */
     public Optional<UrlMappingItem> findById(Long id) {
-        QueryConditional condition = QueryConditional.keyEqualTo(
-                Key.builder().partitionValue(id).build()
-        );
-        return urlMappingTable.index("id-index")
-                .query(r -> r.queryConditional(condition).limit(1))
-                .stream()
-                .flatMap(page -> page.items().stream())
-                .findFirst();
+        return dynamo(() -> {
+            QueryConditional condition = QueryConditional.keyEqualTo(
+                    Key.builder().partitionValue(id).build()
+            );
+            return urlMappingTable.index("id-index")
+                    .query(r -> r.queryConditional(condition).limit(1))
+                    .stream()
+                    .flatMap(page -> page.items().stream())
+                    .findFirst();
+        });
     }
 
     /**
@@ -495,36 +543,38 @@ public class UrlMappingDynamoRepository {
      * Asks DynamoDB for the count only, so no items are transferred.
      */
     public long countByOwnerId(Long ownerId, String createdAfter, String notExpiredAt) {
-        Map<String, AttributeValue> values = new HashMap<>();
-        values.put(":owner", AttributeValue.builder().n(ownerId.toString()).build());
-        String keyCondition = "ownerId = :owner";
-        if (createdAfter != null) {
-            values.put(":after", AttributeValue.builder().s(createdAfter).build());
-            keyCondition += " AND createdDate > :after";
-        }
-        String filter = null;
-        if (notExpiredAt != null) {
-            values.put(":now", AttributeValue.builder().s(notExpiredAt).build());
-            filter = "attribute_not_exists(expiresAt) OR expiresAt > :now";
-        }
-
-        long total = 0;
-        Map<String, AttributeValue> startKey = null;
-        do {
-            QueryResponse page = dynamoDbClient.query(QueryRequest.builder()
-                    .tableName(tableName)
-                    .indexName("ownerId-index")
-                    .keyConditionExpression(keyCondition)
-                    .filterExpression(filter)
-                    .expressionAttributeValues(values)
-                    .select(Select.COUNT)
-                    .exclusiveStartKey(startKey)
-                    .build());
-            total += page.count();
-            startKey = page.hasLastEvaluatedKey() && !page.lastEvaluatedKey().isEmpty()
-                    ? page.lastEvaluatedKey() : null;
-        } while (startKey != null);
-        return total;
+        return dynamo(() -> {
+            Map<String, AttributeValue> values = new HashMap<>();
+            values.put(":owner", AttributeValue.builder().n(ownerId.toString()).build());
+            String keyCondition = "ownerId = :owner";
+            if (createdAfter != null) {
+                values.put(":after", AttributeValue.builder().s(createdAfter).build());
+                keyCondition += " AND createdDate > :after";
+            }
+            String filter = null;
+            if (notExpiredAt != null) {
+                values.put(":now", AttributeValue.builder().s(notExpiredAt).build());
+                filter = "attribute_not_exists(expiresAt) OR expiresAt > :now";
+            }
+    
+            long total = 0;
+            Map<String, AttributeValue> startKey = null;
+            do {
+                QueryResponse page = dynamoDbClient.query(QueryRequest.builder()
+                        .tableName(tableName)
+                        .indexName("ownerId-index")
+                        .keyConditionExpression(keyCondition)
+                        .filterExpression(filter)
+                        .expressionAttributeValues(values)
+                        .select(Select.COUNT)
+                        .exclusiveStartKey(startKey)
+                        .build());
+                total += page.count();
+                startKey = page.hasLastEvaluatedKey() && !page.lastEvaluatedKey().isEmpty()
+                        ? page.lastEvaluatedKey() : null;
+            } while (startKey != null);
+            return total;
+        });
     }
 
     // ============================================================
@@ -535,8 +585,10 @@ public class UrlMappingDynamoRepository {
      * Deletes a URL mapping by its short URL (partition key).
      */
     public void deleteByShortUrl(String shortUrl) {
-        Key key = Key.builder().partitionValue(shortUrl).build();
-        urlMappingTable.deleteItem(key);
+        dynamoRun(() -> {
+            Key key = Key.builder().partitionValue(shortUrl).build();
+            urlMappingTable.deleteItem(key);
+        });
     }
 
     // ============================================================
@@ -553,21 +605,23 @@ public class UrlMappingDynamoRepository {
      * by the Enhanced client's updateItem (which replaces entire items).
      */
     public void incrementClickCount(String shortUrl) {
-        try {
-            dynamoDbClient.updateItem(UpdateItemRequest.builder()
-                    .tableName(tableName)
-                    .key(Map.of("shortUrl",
-                            software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
-                                    .s(shortUrl).build()))
-                    .updateExpression("ADD clickCount :inc")
-                    .conditionExpression("attribute_exists(shortUrl)")
-                    .expressionAttributeValues(Map.of(":inc",
-                            software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
-                                    .n("1").build()))
-                    .build());
-        } catch (ConditionalCheckFailedException e) {
-            // Mapping was deleted; there is no count left to update.
-        }
+        dynamoRun(() -> {
+            try {
+                dynamoDbClient.updateItem(UpdateItemRequest.builder()
+                        .tableName(tableName)
+                        .key(Map.of("shortUrl",
+                                software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                                        .s(shortUrl).build()))
+                        .updateExpression("ADD clickCount :inc")
+                        .conditionExpression("attribute_exists(shortUrl)")
+                        .expressionAttributeValues(Map.of(":inc",
+                                software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                                        .n("1").build()))
+                        .build());
+            } catch (ConditionalCheckFailedException e) {
+                // Mapping was deleted; there is no count left to update.
+            }
+        });
     }
 
     /**
@@ -580,21 +634,23 @@ public class UrlMappingDynamoRepository {
      * else untouched. Does nothing if the link no longer exists.
      */
     public void setExpiresAt(String shortUrl, String expiresAt) {
-        UpdateItemRequest.Builder request = UpdateItemRequest.builder()
-                .tableName(tableName)
-                .key(Map.of("shortUrl", AttributeValue.builder().s(shortUrl).build()))
-                .conditionExpression("attribute_exists(shortUrl)");
-        if (expiresAt != null) {
-            request.updateExpression("SET expiresAt = :e")
-                    .expressionAttributeValues(Map.of(":e", AttributeValue.builder().s(expiresAt).build()));
-        } else {
-            request.updateExpression("REMOVE expiresAt");
-        }
-        try {
-            dynamoDbClient.updateItem(request.build());
-        } catch (ConditionalCheckFailedException e) {
-            // Deleted meanwhile.
-        }
+        dynamoRun(() -> {
+            UpdateItemRequest.Builder request = UpdateItemRequest.builder()
+                    .tableName(tableName)
+                    .key(Map.of("shortUrl", AttributeValue.builder().s(shortUrl).build()))
+                    .conditionExpression("attribute_exists(shortUrl)");
+            if (expiresAt != null) {
+                request.updateExpression("SET expiresAt = :e")
+                        .expressionAttributeValues(Map.of(":e", AttributeValue.builder().s(expiresAt).build()));
+            } else {
+                request.updateExpression("REMOVE expiresAt");
+            }
+            try {
+                dynamoDbClient.updateItem(request.build());
+            } catch (ConditionalCheckFailedException e) {
+                // Deleted meanwhile.
+            }
+        });
     }
 
     /**
@@ -607,27 +663,29 @@ public class UrlMappingDynamoRepository {
 
     public boolean updateOriginalUrl(String shortUrl, String originalUrl, String ownerUrlKey,
                                      String updatedDate) {
-        try {
-            dynamoDbClient.updateItem(UpdateItemRequest.builder()
-                    .tableName(tableName)
-                    .key(Map.of("shortUrl",
-                            software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
-                                    .s(shortUrl).build()))
-                    .updateExpression("SET originalUrl = :originalUrl, ownerUrlKey = :ownerUrlKey, "
-                            + "updatedDate = :updatedDate")
-                    .conditionExpression("attribute_exists(shortUrl)")
-                    .expressionAttributeValues(Map.of(
-                            ":originalUrl", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
-                                    .s(originalUrl).build(),
-                            ":ownerUrlKey", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
-                                    .s(ownerUrlKey).build(),
-                            ":updatedDate", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
-                                    .s(updatedDate).build()))
-                    .build());
-            return true;
-        } catch (ConditionalCheckFailedException e) {
-            return false;
-        }
+        return dynamo(() -> {
+            try {
+                dynamoDbClient.updateItem(UpdateItemRequest.builder()
+                        .tableName(tableName)
+                        .key(Map.of("shortUrl",
+                                software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                                        .s(shortUrl).build()))
+                        .updateExpression("SET originalUrl = :originalUrl, ownerUrlKey = :ownerUrlKey, "
+                                + "updatedDate = :updatedDate")
+                        .conditionExpression("attribute_exists(shortUrl)")
+                        .expressionAttributeValues(Map.of(
+                                ":originalUrl", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                                        .s(originalUrl).build(),
+                                ":ownerUrlKey", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                                        .s(ownerUrlKey).build(),
+                                ":updatedDate", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder()
+                                        .s(updatedDate).build()))
+                        .build());
+                return true;
+            } catch (ConditionalCheckFailedException e) {
+                return false;
+            }
+        });
     }
 
     // ============================================================

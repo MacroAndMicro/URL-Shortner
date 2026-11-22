@@ -31,6 +31,7 @@
 		<!-- Tests skip main(), which sets the same time zone for the application. -->
 		<argLine>-Duser.timezone=UTC</argLine>
 		<aws.sdk.version>2.27.21</aws.sdk.version>
+		<resilience4j.version>2.4.0</resilience4j.version>
 	</properties>
 
 	<dependencyManagement>
@@ -144,6 +145,17 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+		<!-- Circuit breakers. Core modules only: there is no Spring Boot 4 starter yet. -->
+		<dependency>
+			<groupId>io.github.resilience4j</groupId>
+			<artifactId>resilience4j-circuitbreaker</artifactId>
+			<version>${resilience4j.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>io.github.resilience4j</groupId>
+			<artifactId>resilience4j-micrometer</artifactId>
+			<version>${resilience4j.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>io.micrometer</groupId>

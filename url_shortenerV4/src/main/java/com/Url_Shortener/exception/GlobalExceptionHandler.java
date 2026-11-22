@@ -1,5 +1,6 @@
 package com.Url_Shortener.exception;
 
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import com.Url_Shortener.dto.ApiResponse;
 import io.jsonwebtoken.JwtException;
 import org.slf4j.Logger;
@@ -103,6 +104,14 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleServiceUnavailable(ServiceUnavailableException ex) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE.value(), ex.getMessage()));
+    }
+
+    @ExceptionHandler(CallNotPermittedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCircuitOpen(CallNotPermittedException ex) {
+        // A service this request needs is down and its circuit breaker is open.
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE.value(),
+                        "Service temporarily unavailable. Please try again shortly."));
     }
 
     @ExceptionHandler(SdkClientException.class)

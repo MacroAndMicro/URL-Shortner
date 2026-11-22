@@ -5,7 +5,12 @@ import com.Url_Shortener.dto.ClickEventDto;
 import com.Url_Shortener.metrics.UrlShortenerMetrics;
 import com.Url_Shortener.model.ClickEventDocument;
 import com.Url_Shortener.model.DailyClickTotalDocument;
+import com.Url_Shortener.exception.ServiceUnavailableException;
 import com.Url_Shortener.repository.ClickEventMongoRepository;
+import com.Url_Shortener.resilience.Breakers;
+import com.Url_Shortener.resilience.Guarded;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,9 +50,12 @@ import java.util.stream.Collectors;
  * survive the trimming of click_events.
  *
  * ERROR HANDLING:
- * Queries wrap operations in try/catch: on error they return
- * empty/zero results and log a warning. saveClickEvent rethrows
- * so the Kafka consumer can retry and dead-letter failed events.
+ * Calls go through the "mongodb" circuit breaker, so during an outage
+ * they fail at once instead of waiting for MongoDB timeouts.
+ * - Queries throw ServiceUnavailableException (503) when MongoDB cannot
+ *   answer, rather than returning zeros that would look like real data.
+ * - saveClickEvent rethrows, so the Kafka consumer waits and retries.
+ * - Deletes are best effort: on failure they log and carry on.
  */
 @Service
 public class MongoAnalyticsStorage implements AnalyticsStorage {
@@ -57,16 +65,39 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
     /** Removed: it deleted clicks after 400 days for every plan. */
     static final String OLD_TTL_INDEX = "click_date_ttl";
 
+    static final String UNAVAILABLE = "Analytics are temporarily unavailable. Please try again shortly.";
+
     private final ClickEventMongoRepository mongoRepository;
     private final MongoTemplate mongoTemplate;
     private final UrlShortenerMetrics metrics;
+    private final Guarded mongo;
 
+    @Autowired
     public MongoAnalyticsStorage(ClickEventMongoRepository mongoRepository,
                                   MongoTemplate mongoTemplate,
-                                  UrlShortenerMetrics metrics) {
+                                  UrlShortenerMetrics metrics,
+                                  CircuitBreakerRegistry breakers) {
         this.mongoRepository = mongoRepository;
         this.mongoTemplate = mongoTemplate;
         this.metrics = metrics;
+        this.mongo = new Guarded(breakers.circuitBreaker(Breakers.MONGODB), log);
+    }
+
+    /** With a breaker of its own; for tests. */
+    public MongoAnalyticsStorage(ClickEventMongoRepository mongoRepository,
+                                  MongoTemplate mongoTemplate,
+                                  UrlShortenerMetrics metrics) {
+        this(mongoRepository, mongoTemplate, metrics, CircuitBreakerRegistry.ofDefaults());
+    }
+
+    /** A query through the breaker; a 503 for the user if MongoDB cannot answer. */
+    private <T> T query(String what, java.util.function.Supplier<T> call) {
+        try {
+            return mongo.call(call);
+        } catch (RuntimeException e) {
+            mongo.logFailure(what, e);
+            throw new ServiceUnavailableException(UNAVAILABLE);
+        }
     }
 
     // ============================================================
@@ -133,33 +164,55 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
     // ============================================================
 
     /**
-     * Stores the click and adds it to its daily total. If the total update
-     * fails after the click is stored, the retry sees a duplicate and skips
-     * it, so the daily total can undercount by that click.
+     * Stores the click and adds it to its daily total, in three steps: insert
+     * the click marked uncounted, add it to the day's total, mark it counted.
+     *
+     * A retry of the same event (Kafka redelivery, or after a reply was lost
+     * while MongoDB was down) finds the click already stored. If it is still
+     * uncounted, the earlier attempt stopped before the total was updated, so
+     * this attempt finishes it; if counted, it is a true duplicate and skipped.
+     * Only an update whose reply is lost after it was applied can still be
+     * counted twice.
+     *
+     * @return true if this call counted the click (the caller then updates
+     *         the link's click count), false for a duplicate
      */
     @Override
     public boolean saveClickEvent(String eventId, String shortUrl, LocalDateTime clickDate,
                                   String ipAddress, String referrer, String userAgent) {
         var sample = metrics.startTimer();
         try {
-            mongoRepository.insert(new ClickEventDocument(
-                    eventId, shortUrl, clickDate, ipAddress, referrer, userAgent));
-            String day = clickDate.toLocalDate().toString();
-            mongoTemplate.upsert(
-                    Query.query(Criteria.where("_id").is(DailyClickTotalDocument.idOf(shortUrl, day))),
-                    new Update().inc("count", 1).setOnInsert("shortUrl", shortUrl).setOnInsert("day", day),
-                    DailyClickTotalDocument.class);
-            metrics.incrementMongoWrite();
+            boolean counted = mongo.call(() -> {
+                try {
+                    mongoRepository.insert(new ClickEventDocument(
+                            eventId, shortUrl, clickDate, ipAddress, referrer, userAgent));
+                } catch (DuplicateKeyException e) {
+                    ClickEventDocument existing = mongoTemplate.findOne(
+                            Query.query(Criteria.where("eventId").is(eventId)), ClickEventDocument.class);
+                    if (existing == null || !Boolean.FALSE.equals(existing.getCounted())) {
+                        return false;
+                    }
+                }
+                String day = clickDate.toLocalDate().toString();
+                mongoTemplate.upsert(
+                        Query.query(Criteria.where("_id").is(DailyClickTotalDocument.idOf(shortUrl, day))),
+                        new Update().inc("count", 1).setOnInsert("shortUrl", shortUrl).setOnInsert("day", day),
+                        DailyClickTotalDocument.class);
+                mongoTemplate.updateFirst(Query.query(Criteria.where("eventId").is(eventId)),
+                        new Update().set("counted", true), ClickEventDocument.class);
+                return true;
+            });
             metrics.stopMongoPersistTime(sample);
-            return true;
-        } catch (DuplicateKeyException e) {
-            metrics.stopMongoPersistTime(sample);
-            log.debug("Ignoring redelivered click event: eventId={}", eventId);
-            return false;
-        } catch (Exception e) {
+            if (counted) {
+                metrics.incrementMongoWrite();
+            } else {
+                log.debug("Ignoring redelivered click event: eventId={}", eventId);
+            }
+            return counted;
+        } catch (RuntimeException e) {
             metrics.incrementMongoWriteFailure();
             metrics.stopMongoPersistTime(sample);
-            log.warn("Failed to log click event for shortUrl '{}': {}", shortUrl, e.getMessage());
+            mongo.logFailure("Storing click event for shortUrl '" + shortUrl + "'", e);
             throw e;
         }
     }
@@ -170,14 +223,10 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
 
     @Override
     public List<ClickEventDetailDto> findByShortUrlAndDateBetween(String shortUrl, LocalDateTime start, LocalDateTime end) {
-        try {
-            return mongoRepository.findByShortUrlAndClickDateBetween(shortUrl, start, end).stream()
-                    .map(this::toDetailDto)
-                    .toList();
-        } catch (Exception e) {
-            log.warn("Failed to query click event details for shortUrl '{}': {}", shortUrl, e.getMessage());
-            return Collections.emptyList();
-        }
+        return query("Click details for '" + shortUrl + "'",
+                () -> mongoRepository.findByShortUrlAndClickDateBetween(shortUrl, start, end)).stream()
+                .map(this::toDetailDto)
+                .toList();
     }
 
     // ============================================================
@@ -209,7 +258,8 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
                     Aggregation.group("day").sum("count").as("count"),
                     Aggregation.sort(Sort.Direction.ASC, "_id"));
 
-            return mongoTemplate.aggregate(aggregation, GroupCount.class).getMappedResults().stream()
+            return query("Clicks per day for " + shortUrls.size() + " links",
+                    () -> mongoTemplate.aggregate(aggregation, GroupCount.class).getMappedResults()).stream()
                     .map(group -> {
                         ClickEventDto dto = new ClickEventDto();
                         dto.setClickDate(LocalDate.parse(group.id));
@@ -217,9 +267,6 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
                         return dto;
                     })
                     .toList();
-        } catch (Exception e) {
-            log.warn("Failed to aggregate clicks for {} shortUrls: {}", shortUrls.size(), e.getMessage());
-            return Collections.emptyList();
         } finally {
             metrics.stopAnalyticsQueryTime(sample);
         }
@@ -237,11 +284,9 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
                     Aggregation.match(daysInRange(shortUrls, start, end)),
                     Aggregation.group("shortUrl").sum("count").as("count"));
 
-            return mongoTemplate.aggregate(aggregation, GroupCount.class).getMappedResults().stream()
+            return query("Clicks per link for " + shortUrls.size() + " links",
+                    () -> mongoTemplate.aggregate(aggregation, GroupCount.class).getMappedResults()).stream()
                     .collect(Collectors.toMap(group -> group.id, group -> group.count));
-        } catch (Exception e) {
-            log.warn("Failed to count clicks per URL for {} shortUrls: {}", shortUrls.size(), e.getMessage());
-            return Collections.emptyMap();
         } finally {
             metrics.stopAnalyticsQueryTime(sample);
         }
@@ -255,40 +300,30 @@ public class MongoAnalyticsStorage implements AnalyticsStorage {
 
     @Override
     public long countByShortUrl(String shortUrl) {
-        try {
-            return mongoTemplate.find(Query.query(Criteria.where("shortUrl").is(shortUrl)),
-                            DailyClickTotalDocument.class).stream()
-                    .mapToLong(DailyClickTotalDocument::getCount).sum();
-        } catch (Exception e) {
-            log.warn("Failed to count clicks for shortUrl '{}': {}", shortUrl, e.getMessage());
-            return 0;
-        }
+        return query("Total clicks for '" + shortUrl + "'",
+                () -> mongoTemplate.find(Query.query(Criteria.where("shortUrl").is(shortUrl)),
+                        DailyClickTotalDocument.class)).stream()
+                .mapToLong(DailyClickTotalDocument::getCount).sum();
     }
 
     // ============================================================
-    // DELETE
+    // DELETE (best effort)
     // ============================================================
 
     @Override
     public void deleteByShortUrl(String shortUrl) {
-        try {
+        mongo.runOr("Deleting click data for '" + shortUrl + "'", () -> {
             mongoRepository.deleteByShortUrl(shortUrl);
             mongoTemplate.remove(Query.query(Criteria.where("shortUrl").is(shortUrl)), DailyClickTotalDocument.class);
-        } catch (Exception e) {
-            log.warn("Failed to delete click data for shortUrl '{}': {}", shortUrl, e.getMessage());
-        }
+        });
     }
 
     @Override
     public long deleteClickDetailsBefore(String shortUrl, LocalDateTime cutoff) {
-        try {
-            return mongoTemplate.remove(Query.query(
-                            Criteria.where("shortUrl").is(shortUrl).and("clickDate").lt(cutoff)),
-                    ClickEventDocument.class).getDeletedCount();
-        } catch (Exception e) {
-            log.warn("Failed to trim click events for shortUrl '{}': {}", shortUrl, e.getMessage());
-            return 0;
-        }
+        return mongo.callOr("Trimming click events for '" + shortUrl + "'",
+                () -> mongoTemplate.remove(Query.query(
+                                Criteria.where("shortUrl").is(shortUrl).and("clickDate").lt(cutoff)),
+                        ClickEventDocument.class).getDeletedCount(), 0L);
     }
 
     // ============================================================

@@ -1,5 +1,8 @@
 package com.Url_Shortener.config;
 
+import com.Url_Shortener.resilience.Breakers;
+import org.springframework.util.backoff.BackOff;
+import org.springframework.util.backoff.FixedBackOff;
 import com.Url_Shortener.event.ClickEventCreatedEvent;
 import com.Url_Shortener.metrics.UrlShortenerMetrics;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -152,6 +155,10 @@ public class KafkaConfig {
             recoverer.accept(record, ex);
             metrics.incrementKafkaDeadLetter();
         }, backOff);
+        // MongoDB being down is not the event's fault: keep retrying (every 5 s)
+        // until it is back instead of dead-lettering. AnalyticsConsumerPauser
+        // pauses the consumer meanwhile, so these retries are rare.
+        errorHandler.setBackOffFunction((record, ex) -> backOffFor(ex));
         errorHandler.setRetryListeners((record, ex, deliveryAttempt) ->
                 org.slf4j.LoggerFactory.getLogger(KafkaConfig.class).warn(
                         "Kafka retry attempt {} for event: key={}, error={}",
@@ -160,5 +167,16 @@ public class KafkaConfig {
         );
 
         return errorHandler;
+    }
+
+    /**
+     * Retries for a failed click event: until MongoDB is back if it is
+     * unavailable; otherwise null, meaning the handler default (3 tries, then
+     * the dead-letter topic).
+     */
+    static BackOff backOffFor(Throwable ex) {
+        return Breakers.mongoDbUnavailable(ex)
+                ? new FixedBackOff(5000L, FixedBackOff.UNLIMITED_ATTEMPTS)
+                : null;
     }
 }

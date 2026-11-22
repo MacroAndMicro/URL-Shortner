@@ -1,6 +1,10 @@
 package com.Url_Shortener.plan;
 
 import com.Url_Shortener.exception.LimitExceededException;
+import com.Url_Shortener.resilience.Breakers;
+import com.Url_Shortener.resilience.Guarded;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.Url_Shortener.exception.ServiceUnavailableException;
 import com.Url_Shortener.security.IpHasher;
 import com.Url_Shortener.security.Sha256;
@@ -44,13 +48,22 @@ public class GuestQuotaService {
     private final IpHasher ipHasher;
     private final Clock clock;
     private final long ipDailyLimit;
+    private final Guarded redis;
 
+    @Autowired
     public GuestQuotaService(StringRedisTemplate redisTemplate, IpHasher ipHasher, Clock clock,
-                             @Value("${app.guest.ip-daily-limit:10}") long ipDailyLimit) {
+                             @Value("${app.guest.ip-daily-limit:10}") long ipDailyLimit,
+                             CircuitBreakerRegistry breakers) {
         this.redisTemplate = redisTemplate;
         this.ipHasher = ipHasher;
         this.clock = clock;
         this.ipDailyLimit = ipDailyLimit;
+        this.redis = new Guarded(breakers.circuitBreaker(Breakers.REDIS), log);
+    }
+
+    /** With a breaker of its own; for tests. */
+    public GuestQuotaService(StringRedisTemplate redisTemplate, IpHasher ipHasher, Clock clock, long ipDailyLimit) {
+        this(redisTemplate, ipHasher, clock, ipDailyLimit, CircuitBreakerRegistry.ofDefaults());
     }
 
     public static void validateGuestId(String guestId) {
@@ -65,28 +78,36 @@ public class GuestQuotaService {
      */
     public void acquire(String guestId, String ipAddress) {
         validateGuestId(guestId);
-        try {
-            String ipKey = "guest:ip:" + ipHasher.hash(ipAddress) + ":" + LocalDate.now(clock);
-            Long count = redisTemplate.opsForValue().increment(ipKey);
-            if (count != null && count == 1) {
+        // Only the Redis calls go through the breaker: a guest at their limit is
+        // a normal answer, not a Redis failure.
+        String ipKey = "guest:ip:" + ipHasher.hash(ipAddress) + ":" + LocalDate.now(clock);
+        Long count = redisCall(() -> {
+            Long n = redisTemplate.opsForValue().increment(ipKey);
+            if (n != null && n == 1) {
                 redisTemplate.expire(ipKey, Duration.ofDays(2));
             }
-            if (count != null && count > ipDailyLimit) {
-                throw LimitExceededException.tooMany(
-                        "Too many guest links from your network today. Sign up free to create more.");
-            }
+            return n;
+        });
+        if (count != null && count > ipDailyLimit) {
+            throw LimitExceededException.tooMany(
+                    "Too many guest links from your network today. Sign up free to create more.");
+        }
 
-            Boolean reserved = redisTemplate.opsForValue()
-                    .setIfAbsent(browserKey(guestId), "1", Plan.GUEST.linkLifetime());
-            if (!Boolean.TRUE.equals(reserved)) {
-                throw LimitExceededException.forbidden(
-                        "Guests can have " + Plan.GUEST.linkLimit()
-                                + " active link at a time. Sign up free to create more.");
-            }
-        } catch (LimitExceededException e) {
-            throw e;
-        } catch (Exception e) {
-            log.warn("Guest quota check failed: {}", e.getMessage());
+        Boolean reserved = redisCall(() -> redisTemplate.opsForValue()
+                .setIfAbsent(browserKey(guestId), "1", Plan.GUEST.linkLifetime()));
+        if (!Boolean.TRUE.equals(reserved)) {
+            throw LimitExceededException.forbidden(
+                    "Guests can have " + Plan.GUEST.linkLimit()
+                            + " active link at a time. Sign up free to create more.");
+        }
+    }
+
+    /** A Redis call; if Redis is unavailable, guest links are refused rather than unlimited. */
+    private <T> T redisCall(java.util.function.Supplier<T> call) {
+        try {
+            return redis.call(call);
+        } catch (RuntimeException e) {
+            redis.logFailure("Guest quota check", e);
             throw new ServiceUnavailableException(
                     "Guest links are temporarily unavailable. Please sign in or try again later.");
         }
@@ -94,11 +115,7 @@ public class GuestQuotaService {
 
     /** Frees the slot taken by acquire() when link creation failed. */
     public void release(String guestId) {
-        try {
-            redisTemplate.delete(browserKey(guestId));
-        } catch (Exception e) {
-            log.warn("Could not release guest slot: {}", e.getMessage());
-        }
+        redis.runOr("Release guest slot", () -> redisTemplate.delete(browserKey(guestId)));
     }
 
     private static String browserKey(String guestId) {

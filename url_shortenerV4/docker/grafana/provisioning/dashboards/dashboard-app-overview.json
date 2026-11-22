@@ -1,5 +1,7 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -7,83 +9,322 @@
   "links": [],
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "fieldConfig": { "defaults": { "unit": "reqps" } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
       "id": 1,
-      "options": { "legend": { "displayMode": "list" } },
-      "targets": [{ "expr": "rate(redirect_requests_count_total[1m])", "legendFormat": "Redirects/sec" }],
+      "options": {
+        "legend": {
+          "displayMode": "list"
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(redirect_requests_count_total[1m])",
+          "legendFormat": "Redirects/sec"
+        }
+      ],
       "title": "Request Rate",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "fieldConfig": { "defaults": { "unit": "reqps" } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
       "id": 2,
-      "options": { "legend": { "displayMode": "list" } },
+      "options": {
+        "legend": {
+          "displayMode": "list"
+        }
+      },
       "targets": [
-        { "expr": "rate(redirect_success_count_total[1m])", "legendFormat": "Success" },
-        { "expr": "rate(redirect_failure_count_total[1m])", "legendFormat": "Failed" }
+        {
+          "expr": "rate(redirect_success_count_total[1m])",
+          "legendFormat": "Success"
+        },
+        {
+          "expr": "rate(redirect_failure_count_total[1m])",
+          "legendFormat": "Failed"
+        }
       ],
       "title": "Redirect Success vs Failure",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
       "id": 3,
-      "options": { "legend": { "displayMode": "list" } },
+      "options": {
+        "legend": {
+          "displayMode": "list"
+        }
+      },
       "targets": [
-        { "expr": "histogram_quantile(0.50, rate(redirect_total_time_seconds_bucket[5m]))", "legendFormat": "P50" },
-        { "expr": "histogram_quantile(0.95, rate(redirect_total_time_seconds_bucket[5m]))", "legendFormat": "P95" },
-        { "expr": "histogram_quantile(0.99, rate(redirect_total_time_seconds_bucket[5m]))", "legendFormat": "P99" }
+        {
+          "expr": "histogram_quantile(0.50, rate(redirect_total_time_seconds_bucket[5m]))",
+          "legendFormat": "P50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(redirect_total_time_seconds_bucket[5m]))",
+          "legendFormat": "P95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(redirect_total_time_seconds_bucket[5m]))",
+          "legendFormat": "P99"
+        }
       ],
       "title": "Redirect Latency",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "fieldConfig": { "defaults": { "unit": "bytes" } },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
       "id": 4,
-      "options": { "legend": { "displayMode": "list" } },
+      "options": {
+        "legend": {
+          "displayMode": "list"
+        }
+      },
       "targets": [
-        { "expr": "jvm_memory_used_bytes{area=\"heap\"}", "legendFormat": "Heap Used" },
-        { "expr": "jvm_memory_max_bytes{area=\"heap\"}", "legendFormat": "Heap Max" }
+        {
+          "expr": "jvm_memory_used_bytes{area=\"heap\"}",
+          "legendFormat": "Heap Used"
+        },
+        {
+          "expr": "jvm_memory_max_bytes{area=\"heap\"}",
+          "legendFormat": "Heap Max"
+        }
       ],
       "title": "JVM Heap Memory",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "fieldConfig": { "defaults": { "unit": "percent" } },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
       "id": 5,
-      "options": { "legend": { "displayMode": "list" } },
+      "options": {
+        "legend": {
+          "displayMode": "list"
+        }
+      },
       "targets": [
-        { "expr": "system_cpu_usage", "legendFormat": "CPU Usage" },
-        { "expr": "process_cpu_usage", "legendFormat": "Process CPU" }
+        {
+          "expr": "system_cpu_usage",
+          "legendFormat": "CPU Usage"
+        },
+        {
+          "expr": "process_cpu_usage",
+          "legendFormat": "Process CPU"
+        }
       ],
       "title": "CPU Usage",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
       "id": 6,
       "targets": [
-        { "expr": "jvm_threads_live_threads", "legendFormat": "Live Threads" }
+        {
+          "expr": "jvm_threads_live_threads",
+          "legendFormat": "Live Threads"
+        }
       ],
       "title": "JVM Threads",
       "type": "timeseries"
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Circuit breakers",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Current state of each circuit breaker. Open: calls to that service fail at once while it is down. Half-open: trying a few calls to see if it is back.",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "2 * max by (name) (resilience4j_circuitbreaker_state{state=\"open\"}) + max by (name) (resilience4j_circuitbreaker_state{state=\"half_open\"})",
+          "legendFormat": "{{name}}",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Closed",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "Half-open",
+                  "color": "orange",
+                  "index": 1
+                },
+                "2": {
+                  "text": "Open",
+                  "color": "red",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Circuit breaker failure rate",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Share of recent calls to each service that failed. A breaker opens at 50%. -1 means too few calls yet to judge.",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "resilience4j_circuitbreaker_failure_rate",
+          "legendFormat": "{{name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      }
     }
   ],
   "refresh": "10s",
   "schemaVersion": 39,
-  "tags": ["url-shortener", "overview"],
-  "time": { "from": "now-15m", "to": "now" },
+  "tags": [
+    "url-shortener",
+    "overview"
+  ],
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
   "timepicker": {},
   "title": "Application Overview",
   "uid": "app-overview",

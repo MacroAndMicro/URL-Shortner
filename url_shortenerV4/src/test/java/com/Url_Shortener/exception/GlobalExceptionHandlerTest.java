@@ -15,4 +15,15 @@ class GlobalExceptionHandlerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
     }
+
+    @Test
+    void openCircuitBreakerIsServiceUnavailable() {
+        var refused = io.github.resilience4j.circuitbreaker.CallNotPermittedException.createCallNotPermittedException(
+                io.github.resilience4j.circuitbreaker.CircuitBreaker.ofDefaults("dynamodb"));
+
+        var response = new GlobalExceptionHandler().handleCircuitOpen(refused);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(response.getBody().getMessage()).contains("temporarily unavailable");
+    }
 }

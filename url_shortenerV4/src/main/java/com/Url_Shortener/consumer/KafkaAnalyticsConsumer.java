@@ -40,6 +40,9 @@ public class KafkaAnalyticsConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaAnalyticsConsumer.class);
 
+    /** Listener container id, used by AnalyticsConsumerPauser. */
+    public static final String LISTENER_ID = "analytics-consumer";
+
     private final AnalyticsStorage analyticsStorage;
     private final UrlMappingDynamoRepository urlMappingRepository;
     private final UrlShortenerMetrics metrics;
@@ -57,6 +60,7 @@ public class KafkaAnalyticsConsumer {
      * Manual acknowledgment — committed after successful persistence.
      */
     @KafkaListener(
+            id = LISTENER_ID,
             topics = "analytics-events",
             groupId = "analytics-consumer",
             containerFactory = "kafkaListenerContainerFactory"

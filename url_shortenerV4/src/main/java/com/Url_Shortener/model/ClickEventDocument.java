@@ -40,6 +40,14 @@ public class ClickEventDocument {
     private String referrer;
     private String userAgent;
 
+    /**
+     * Whether this click has been added to its daily total. False from insert
+     * until the total is updated, so a retry after a lost reply can finish the
+     * job instead of skipping it as a duplicate. Null on clicks stored before
+     * this field existed; those were counted.
+     */
+    private Boolean counted;
+
     public ClickEventDocument() {
     }
 
@@ -51,6 +59,7 @@ public class ClickEventDocument {
         this.ipAddress = ipAddress;
         this.referrer = referrer;
         this.userAgent = userAgent;
+        this.counted = false;
     }
 
     public String getId() {
@@ -107,5 +116,13 @@ public class ClickEventDocument {
 
     public void setUserAgent(String userAgent) {
         this.userAgent = userAgent;
+    }
+
+    public Boolean getCounted() {
+        return counted;
+    }
+
+    public void setCounted(Boolean counted) {
+        this.counted = counted;
     }
 }

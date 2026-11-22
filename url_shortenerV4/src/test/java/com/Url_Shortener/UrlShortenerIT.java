@@ -82,6 +82,10 @@ class UrlShortenerIT {
         registry.add("app.dev.plan-switch-enabled", () -> "true");
         // Every test registers and logs in from the same address.
         registry.add("app.rate-limit.auth-per-minute", () -> "1000");
+        // Small breaker windows so the outage test trips and recovers quickly.
+        registry.add("app.circuit-breaker.window-size", () -> "4");
+        registry.add("app.circuit-breaker.minimum-calls", () -> "2");
+        registry.add("app.circuit-breaker.open-duration", () -> "3s");
         registry.add("dynamodb.endpoint",
                 () -> "http://" + DYNAMODB.getHost() + ":" + DYNAMODB.getMappedPort(8000));
     }
@@ -296,6 +300,45 @@ class UrlShortenerIT {
         assertThat(second.body()).contains("Sign up");
 
         assertThat(guestShorten("https://example.com/guest", null).statusCode()).isEqualTo(400);
+    }
+
+    @Test
+    void clicksMadeWhileMongoDbIsDownArriveOnceItIsBack() throws Exception {
+        changePlan("YEARLY");
+        String code = shorten("https://example.com/outage").get("shortUrl").asText();
+        String start = LocalDateTime.now().minusHours(1).toString();
+        String end = LocalDateTime.now().plusHours(1).toString();
+        String analytics = "/api/v1/urls/analytics?shortUrl=" + code + "&startDate=" + start + "&endDate=" + end;
+
+        var docker = MONGO.getDockerClient();
+        docker.pauseContainerCmd(MONGO.getContainerId()).exec();
+        try {
+            // Redirects do not need MongoDB.
+            for (int i = 0; i < 3; i++) {
+                assertThat(get("/" + code, null).statusCode()).isEqualTo(302);
+            }
+            // Analytics say they are unavailable instead of showing zero; once
+            // the breaker is open they say so at once.
+            await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
+                long t0 = System.nanoTime();
+                HttpResponse<String> response = get(analytics, token);
+                long tookMs = (System.nanoTime() - t0) / 1_000_000;
+                assertThat(response.statusCode()).isEqualTo(503);
+                assertThat(response.body()).contains("temporarily unavailable");
+                assertThat(tookMs).isLessThan(1000);
+            });
+        } finally {
+            docker.unpauseContainerCmd(MONGO.getContainerId()).exec();
+        }
+
+        // The consumer waited instead of dead-lettering: all three clicks arrive.
+        await().atMost(Duration.ofSeconds(90)).pollInterval(Duration.ofSeconds(2)).untilAsserted(() -> {
+            HttpResponse<String> response = get(analytics, token);
+            assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
+            JsonNode byDay = json.readTree(response.body()).get("data");
+            assertThat(byDay).hasSize(1);
+            assertThat(byDay.get(0).get("count").asLong()).isEqualTo(3);
+        });
     }
 
     @Test

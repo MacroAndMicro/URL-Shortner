@@ -7,6 +7,9 @@ spring:
     username: ${SPRING_DATASOURCE_USERNAME:postgres}
     password: ${SPRING_DATASOURCE_PASSWORD:postgres123}
     driver-class-name: org.postgresql.Driver
+    # Fail within 3 s, not the default 30 s, when Postgres cannot hand out a connection.
+    hikari:
+      connection-timeout: 3000
 
   jpa:
     hibernate:
@@ -72,6 +75,23 @@ server:
 # Application Settings
 # ============================================================
 app:
+  # Circuit breakers (see ResilienceConfig). Each watches its last window-size
+  # calls; once minimum-calls were made, if failure-rate-percent of them failed
+  # or were slower than the slow-call threshold, calls fail at once for
+  # open-duration, then half-open-calls are let through as a trial.
+  circuit-breaker:
+    window-size: 20
+    minimum-calls: 10
+    failure-rate-percent: 50
+    open-duration: 30s
+    half-open-calls: 3
+    slow-call: 2s
+    redis-slow-call: 300ms
+    kafka-slow-call: 500ms
+  mongodb:
+    server-selection-timeout: 2s
+    connect-timeout: 2s
+    read-timeout: 5s
   # Every running instance needs its own worker id (0-1023), or two instances
   # can hand out the same short code.
   snowflake:

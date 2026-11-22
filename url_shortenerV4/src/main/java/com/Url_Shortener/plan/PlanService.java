@@ -4,6 +4,10 @@ import com.Url_Shortener.entity.User;
 import com.Url_Shortener.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.Url_Shortener.resilience.Breakers;
+import com.Url_Shortener.resilience.Guarded;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -47,11 +51,20 @@ public class PlanService {
     private final UserRepository userRepository;
     private final StringRedisTemplate redisTemplate;
     private final Clock clock;
+    private final Guarded redis;
 
-    public PlanService(UserRepository userRepository, StringRedisTemplate redisTemplate, Clock clock) {
+    @Autowired
+    public PlanService(UserRepository userRepository, StringRedisTemplate redisTemplate, Clock clock,
+                       CircuitBreakerRegistry breakers) {
         this.userRepository = userRepository;
         this.redisTemplate = redisTemplate;
         this.clock = clock;
+        this.redis = new Guarded(breakers.circuitBreaker(Breakers.REDIS), log);
+    }
+
+    /** With a breaker of its own; for tests. */
+    public PlanService(UserRepository userRepository, StringRedisTemplate redisTemplate, Clock clock) {
+        this(userRepository, redisTemplate, clock, CircuitBreakerRegistry.ofDefaults());
     }
 
     public LocalDateTime now() {
@@ -115,32 +128,24 @@ public class PlanService {
             return OwnerStatus.GUEST;
         }
         String key = OWNER_CACHE_PREFIX + ownerId;
-        try {
-            String cached = redisTemplate.opsForValue().get(key);
-            if (cached != null) {
-                return decode(cached);
-            }
-        } catch (Exception e) {
-            log.warn("Redis plan lookup failed for owner {}: {}", ownerId, e.getMessage());
+        String cached = redis.callOr("Redis plan lookup for owner " + ownerId,
+                () -> redisTemplate.opsForValue().get(key), null);
+        if (cached != null) {
+            return decode(cached);
         }
 
         User owner = userRepository.findById(ownerId).orElse(null);
         Plan subscribed = owner != null ? owner.getPlan() : Plan.FREE;
         LocalDateTime periodEnd = owner != null ? owner.getPlanPeriodEnd() : null;
-        try {
-            redisTemplate.opsForValue().set(key, encode(subscribed, periodEnd), OWNER_CACHE_TTL);
-        } catch (Exception e) {
-            log.warn("Redis plan cache write failed for owner {}: {}", ownerId, e.getMessage());
-        }
+        redis.runOr("Redis plan cache write for owner " + ownerId,
+                () -> redisTemplate.opsForValue().set(key, encode(subscribed, periodEnd), OWNER_CACHE_TTL));
         return status(subscribed, periodEnd);
     }
 
+    /** Best effort: a stale copy otherwise expires within OWNER_CACHE_TTL. */
     public void evictOwner(Long ownerId) {
-        try {
-            redisTemplate.delete(OWNER_CACHE_PREFIX + ownerId);
-        } catch (Exception e) {
-            log.warn("Could not evict cached plan for user {}; it expires within {}", ownerId, OWNER_CACHE_TTL);
-        }
+        redis.runOr("Redis plan cache evict for owner " + ownerId,
+                () -> redisTemplate.delete(OWNER_CACHE_PREFIX + ownerId));
     }
 
     private static String encode(Plan plan, LocalDateTime periodEnd) {

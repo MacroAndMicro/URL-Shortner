@@ -43,6 +43,7 @@ public class UrlShortenerMetrics {
     private final Counter cacheMisses;
     private final Counter kafkaEventsPublished;
     private final Counter kafkaPublishFailures;
+    private final Counter kafkaPublishSkipped;
     private final Counter kafkaEventsConsumed;
     private final Counter kafkaEventsDeadLetter;
     private final Counter mongoWrites;
@@ -116,6 +117,9 @@ public class UrlShortenerMetrics {
         this.kafkaPublishFailures = Counter.builder("kafka.events.publish.failures.count")
                 .description("Kafka events that failed to publish")
                 .register(registry);
+        this.kafkaPublishSkipped = Counter.builder("kafka.events.publish.skipped.count")
+                .description("Click events not sent because the Kafka circuit breaker was open")
+                .register(registry);
 
         this.kafkaEventsConsumed = Counter.builder("kafka.events.consumed.count")
                 .description("Kafka events consumed")
@@ -176,6 +180,7 @@ public class UrlShortenerMetrics {
     public void incrementCacheMiss() { cacheMisses.increment(); }
     public void incrementKafkaPublished() { kafkaEventsPublished.increment(); }
     public void incrementKafkaPublishFailure() { kafkaPublishFailures.increment(); }
+    public void incrementKafkaPublishSkipped() { kafkaPublishSkipped.increment(); }
     public void incrementKafkaConsumed() { kafkaEventsConsumed.increment(); }
     public void incrementKafkaDeadLetter() { kafkaEventsDeadLetter.increment(); }
     public void incrementMongoWrite() { mongoWrites.increment(); }

@@ -22,4 +22,20 @@ class KafkaConfigTest {
         assertThat(factory.getContainerProperties().getAckMode())
                 .isEqualTo(ContainerProperties.AckMode.MANUAL);
     }
+
+    @Test
+    void clickEventsWaitForMongoDbInsteadOfBeingDeadLettered() {
+        var down = new RuntimeException(new org.springframework.dao.DataAccessResourceFailureException("timed out"));
+
+        var backOff = KafkaConfig.backOffFor(down);
+
+        assertThat(backOff).isInstanceOf(org.springframework.util.backoff.FixedBackOff.class);
+        assertThat(((org.springframework.util.backoff.FixedBackOff) backOff).getMaxAttempts())
+                .isEqualTo(org.springframework.util.backoff.FixedBackOff.UNLIMITED_ATTEMPTS);
+    }
+
+    @Test
+    void otherFailuresKeepTheDefaultRetriesAndDeadLetter() {
+        assertThat(KafkaConfig.backOffFor(new IllegalArgumentException("bad event"))).isNull();
+    }
 }

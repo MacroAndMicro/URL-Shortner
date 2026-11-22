@@ -101,6 +101,29 @@ class MongoAnalyticsStorageIT {
     }
 
     @Test
+    void aRetryFinishesAClickWhoseTotalWasNotUpdated() {
+        // A first attempt stored the click, then its reply was lost before the total was updated.
+        String eventId = UUID.randomUUID().toString();
+        mongo.insert(new ClickEventDocument(eventId, "aaaa", DAY1, "hash", null, "agent"));
+
+        assertThat(storage.saveClickEvent(eventId, "aaaa", DAY1, "hash", null, "agent")).isTrue();
+        assertThat(storage.saveClickEvent(eventId, "aaaa", DAY1, "hash", null, "agent")).isFalse();
+
+        assertThat(storage.countByShortUrl("aaaa")).isEqualTo(1);
+    }
+
+    @Test
+    void clicksStoredBeforeTheCountedFlagAreNotCountedAgain() {
+        String eventId = UUID.randomUUID().toString();
+        ClickEventDocument legacy = new ClickEventDocument(eventId, "aaaa", DAY1, "hash", null, "agent");
+        legacy.setCounted(null);
+        mongo.insert(legacy);
+
+        assertThat(storage.saveClickEvent(eventId, "aaaa", DAY1, "hash", null, "agent")).isFalse();
+        assertThat(storage.countByShortUrl("aaaa")).isZero();
+    }
+
+    @Test
     void trimmingDetailsKeepsDailyTotals() {
         click("aaaa", DAY1);
         click("aaaa", DAY2);
