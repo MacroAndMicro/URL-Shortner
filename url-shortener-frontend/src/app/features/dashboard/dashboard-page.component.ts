@@ -32,12 +32,13 @@ Chart.register(...registerables);
         @if (p.inGracePeriod) {
           <p class="alert-warning mb-6" role="status">
             Your payment is overdue. Pay by {{ p.graceEndsAt | date: 'mediumDate' }} to keep your {{ labels[p.subscribedPlan] }} plan.
+            <a routerLink="/plan" fragment="pay" class="font-semibold underline">Pay now</a>
           </p>
         }
         @if (p.paidLinksExpireAt) {
           <p class="alert-error mb-6" role="status">
             Your {{ labels[p.subscribedPlan] }} plan has lapsed. The links you made on it stop working on
-            {{ p.paidLinksExpireAt | date: 'medium' }} unless you renew. <a routerLink="/plan" class="font-semibold underline">View plan</a>
+            {{ p.paidLinksExpireAt | date: 'medium' }} unless you renew. <a routerLink="/plan" fragment="pay" class="font-semibold underline">Pay now</a>
           </p>
         }
 

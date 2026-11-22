@@ -1,6 +1,7 @@
-import { Component, inject } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
+import { BillingService, formatPrice } from '../../core/services/billing.service';
 import { ShortenCardComponent } from '../../shared/components/shorten-card.component';
 
 interface PlanSummary {
@@ -90,14 +91,30 @@ interface PlanSummary {
           }
         </div>
         <p class="mt-6 text-center text-xs text-slate-500 dark:text-slate-400">
-          Online payment for Monthly and Yearly is coming soon.
+          Pay by UPI, card or netbanking. You pay each month or year yourself; nothing renews automatically.
         </p>
       </div>
     </section>
   `,
 })
-export class LandingPageComponent {
+export class LandingPageComponent implements OnInit {
   auth = inject(AuthService);
+  private billing = inject(BillingService);
+
+  /** Replaces "Billed monthly/yearly" with the server's prices once they load. */
+  ngOnInit(): void {
+    this.billing.prices().subscribe({
+      next: (p) => {
+        for (const price of p.plans) {
+          const card = this.plans.find((c) => c.name.toUpperCase() === price.plan);
+          if (card) {
+            card.price = `${formatPrice(price.amountPaise, price.currency)} / ${price.period}`;
+          }
+        }
+      },
+      error: () => {},
+    });
+  }
 
   heroPoints = [
     'One link without signing up',
