@@ -17,7 +17,17 @@ Test mode takes fake payments: no real money moves, and you can sign up without
 any business verification.
 
 1. Sign up or sign in at the [Razorpay Dashboard](https://dashboard.razorpay.com/).
-2. Switch to **Test Mode** (toggle at the top of the dashboard).
+   Sign-up asks for a **PAN** (your personal PAN if you are not a registered
+   business) before it creates the account; stopping there leaves you with no
+   account ("Unable to find an account linked to your details"). After that
+   step the dashboard opens; the rest of activation (bank account, documents)
+   is only needed for live payments, not for test keys.
+2. Switch to **Test Mode** (toggle at the top of the dashboard). Until the
+   account is activated, the dashboard is in test mode anyway.
+
+   Not ready to give a PAN? Leave the `RAZORPAY_*` variables empty: everything
+   else works, the Plan page says online payment is not set up, and the
+   development plan switch still lets you try the paid plans.
 3. Go to **Account & Settings → API Keys → Generate Test Key**.
 4. Copy the **Key Id** (starts with `rzp_test_`) and the **Key Secret**. The
    secret is shown only once; generate a new key if you lose it.

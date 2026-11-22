@@ -126,6 +126,11 @@ class UrlShortenerIT {
         registry.add("app.circuit-breaker.window-size", () -> "4");
         registry.add("app.circuit-breaker.minimum-calls", () -> "2");
         registry.add("app.circuit-breaker.open-duration", () -> "3s");
+        // With windows this small, one slow Kafka send or Redis call on a busy
+        // machine would open that breaker and drop the clicks a test counts.
+        // Only real failures should open them here.
+        registry.add("app.circuit-breaker.kafka-slow-call", () -> "10s");
+        registry.add("app.circuit-breaker.redis-slow-call", () -> "10s");
         registry.add("app.billing.razorpay.key-id", () -> "rzp_test_it");
         registry.add("app.billing.razorpay.key-secret", () -> RAZORPAY_KEY_SECRET);
         registry.add("app.billing.razorpay.webhook-secret", () -> RAZORPAY_WEBHOOK_SECRET);

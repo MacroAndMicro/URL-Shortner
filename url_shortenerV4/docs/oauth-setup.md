@@ -50,7 +50,9 @@ need to review.
 2. Fill in:
    - **Application name**: `ShortLink local`
    - **Homepage URL**: `http://localhost:4200`
-   - **Authorization callback URL**: `http://localhost:8080/login/oauth2/code/github`
+   - **Authorization callback URL** (newer forms call it **Redirect URI**):
+     `http://localhost:8080/login/oauth2/code/github`. Leave **Allow wildcard
+     matching** unticked; **Expire user access tokens** can stay either way.
    - Leave **Enable Device Flow** unticked. **Register application**.
 3. Copy the **Client ID**. Click **Generate a new client secret** and copy it
    straight away: GitHub shows it only once.
