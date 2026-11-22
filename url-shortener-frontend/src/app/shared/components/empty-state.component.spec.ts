@@ -12,6 +12,8 @@ describe('EmptyStateComponent', () => {
 
     fixture = TestBed.createComponent(EmptyStateComponent);
     component = fixture.componentInstance;
+    fixture.componentRef.setInput('title', 'No links yet');
+    fixture.componentRef.setInput('description', 'Shorten your first link to see it here.');
     fixture.detectChanges();
   });
 
