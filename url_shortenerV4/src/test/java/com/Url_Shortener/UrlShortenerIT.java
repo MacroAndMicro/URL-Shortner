@@ -70,6 +70,36 @@ class UrlShortenerIT {
             .withEnv("JSON_CONFIG", "{\"interactiveLogin\": true}")
             .withExposedPorts(8080);
 
+    /** A fake Razorpay API; stubbed in @BeforeAll. */
+    @Container
+    static final GenericContainer<?> FAKE_RAZORPAY = new GenericContainer<>("wiremock/wiremock:3.9.1")
+            .withExposedPorts(8080);
+
+    /** Catches the emails the app sends. */
+    @Container
+    static final GenericContainer<?> MAILPIT = new GenericContainer<>("axllent/mailpit:v1.20.4")
+            .withExposedPorts(1025, 8025);
+
+    static final String RAZORPAY_KEY_SECRET = "it_key_secret";
+    static final String RAZORPAY_WEBHOOK_SECRET = "it_webhook_secret";
+
+    @org.junit.jupiter.api.BeforeAll
+    static void stubRazorpay() throws Exception {
+        // Answers POST /v1/orders like Razorpay, but only with our key id and secret.
+        Map<String, Object> stub = Map.of(
+                "request", Map.of("method", "POST", "url", "/v1/orders",
+                        "basicAuthCredentials", Map.of("username", "rzp_test_it", "password", RAZORPAY_KEY_SECRET)),
+                "response", Map.of("status", 200,
+                        "headers", Map.of("Content-Type", "application/json"),
+                        "body", "{\"id\": \"order_{{randomValue length=14 type='ALPHANUMERIC'}}\", \"amount\": {{jsonPath request.body '$.amount'}}, \"currency\": \"INR\", \"status\": \"created\"}",
+                        "transformers", List.of("response-template")));
+        HttpResponse<String> created = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create(
+                        "http://localhost:" + FAKE_RAZORPAY.getMappedPort(8080) + "/__admin/mappings"))
+                .POST(HttpRequest.BodyPublishers.ofString(new ObjectMapper().writeValueAsString(stub))).build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+    }
+
     private static String fakeGoogle(String path) {
         return "http://localhost:" + FAKE_GOOGLE.getMappedPort(8080) + "/default" + path;
     }
@@ -96,6 +126,12 @@ class UrlShortenerIT {
         registry.add("app.circuit-breaker.window-size", () -> "4");
         registry.add("app.circuit-breaker.minimum-calls", () -> "2");
         registry.add("app.circuit-breaker.open-duration", () -> "3s");
+        registry.add("app.billing.razorpay.key-id", () -> "rzp_test_it");
+        registry.add("app.billing.razorpay.key-secret", () -> RAZORPAY_KEY_SECRET);
+        registry.add("app.billing.razorpay.webhook-secret", () -> RAZORPAY_WEBHOOK_SECRET);
+        registry.add("app.billing.razorpay.base-url", () -> "http://localhost:" + FAKE_RAZORPAY.getMappedPort(8080));
+        registry.add("spring.mail.host", MAILPIT::getHost);
+        registry.add("spring.mail.port", () -> MAILPIT.getMappedPort(1025));
         registry.add("app.oauth.google.client-id", () -> "it-client");
         registry.add("app.oauth.google.client-secret", () -> "it-secret");
         registry.add("app.oauth.google.authorization-uri", () -> fakeGoogle("/authorize"));
@@ -119,8 +155,17 @@ class UrlShortenerIT {
     private String token;
     private String refreshToken;
 
+    @Autowired
+    private io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry breakers;
+
     @BeforeEach
     void registerAndLogIn() throws Exception {
+        // Each test starts with every breaker closed, whatever an earlier outage test left behind.
+        breakers.getAllCircuitBreakers().forEach(b -> {
+            if (b.getState() != io.github.resilience4j.circuitbreaker.CircuitBreaker.State.CLOSED) {
+                b.transitionToClosedState();
+            }
+        });
         await().atMost(Duration.ofSeconds(30)).ignoreExceptions()
                 .until(() -> dynamoDbClient.describeTable(r -> r.tableName("url_mappings")) != null);
 
@@ -491,6 +536,83 @@ class UrlShortenerIT {
 
     private HttpResponse<String> exchange(String code) throws Exception {
         return post("/api/v1/auth/public/oauth/exchange", Map.of("code", code), null);
+    }
+
+    // ============================================================
+    // PAYMENTS (against FAKE_RAZORPAY) AND REMINDERS (to MAILPIT)
+    // ============================================================
+
+    @Autowired
+    private com.Url_Shortener.billing.PaymentReminderJob reminderJob;
+
+    @Test
+    void payingForMonthlyStartsAPaidMonthAndShowsInHistory() throws Exception {
+        assertThat(data(get("/api/v1/billing/prices", null)).get("paymentsEnabled").asBoolean()).isTrue();
+
+        JsonNode order = data(post("/api/v1/billing/orders", Map.of("plan", "MONTHLY"), token));
+        assertThat(order.get("amountPaise").asInt()).isEqualTo(9900);
+        assertThat(order.get("keyId").asText()).isEqualTo("rzp_test_it");
+        String orderId = order.get("orderId").asText();
+
+        HttpResponse<String> verified = post("/api/v1/billing/verify", Map.of(
+                "razorpay_order_id", orderId, "razorpay_payment_id", "pay_it1",
+                "razorpay_signature", hmac(orderId + "|pay_it1", RAZORPAY_KEY_SECRET)), token);
+        assertThat(verified.statusCode()).as(verified.body()).isEqualTo(200);
+
+        JsonNode plan = data(get("/api/v1/account/plan", token));
+        assertThat(plan.get("effectivePlan").asText()).isEqualTo("MONTHLY");
+        String periodEnd = plan.get("periodEnd").asText();
+        assertThat(java.time.OffsetDateTime.parse(periodEnd).toLocalDate())
+                .isEqualTo(java.time.LocalDate.now(java.time.ZoneOffset.UTC).plusMonths(1));
+
+        // Razorpay's webhook for the same payment changes nothing more.
+        String webhook = json.writeValueAsString(Map.of("event", "payment.captured", "payload", Map.of("payment",
+                Map.of("entity", Map.of("id", "pay_it1", "order_id", orderId, "amount", 9900, "status", "captured")))));
+        HttpResponse<String> hook = http.send(request("/api/v1/billing/webhook", null)
+                .header("Content-Type", "application/json")
+                .header("X-Razorpay-Signature", hmac(webhook, RAZORPAY_WEBHOOK_SECRET))
+                .POST(HttpRequest.BodyPublishers.ofString(webhook)).build(), HttpResponse.BodyHandlers.ofString());
+        assertThat(hook.statusCode()).isEqualTo(200);
+        assertThat(data(get("/api/v1/account/plan", token)).get("periodEnd").asText()).isEqualTo(periodEnd);
+
+        JsonNode history = data(get("/api/v1/billing/payments", token));
+        assertThat(history).hasSize(1);
+        assertThat(history.get(0).get("status").asText()).isEqualTo("PAID");
+        assertThat(history.get(0).get("periodEndAfter").asText()).isEqualTo(periodEnd);
+    }
+
+    @Test
+    void aForgedPaymentConfirmationChangesNothing() throws Exception {
+        String orderId = data(post("/api/v1/billing/orders", Map.of("plan", "YEARLY"), token)).get("orderId").asText();
+
+        HttpResponse<String> forged = post("/api/v1/billing/verify", Map.of(
+                "razorpay_order_id", orderId, "razorpay_payment_id", "pay_fake",
+                "razorpay_signature", hmac(orderId + "|pay_fake", "guessed-secret")), token);
+
+        assertThat(forged.statusCode()).isEqualTo(400);
+        assertThat(data(get("/api/v1/account/plan", token)).get("effectivePlan").asText()).isEqualTo("FREE");
+    }
+
+    @Test
+    void aPlanDueSoonGetsOneReminderEmail() throws Exception {
+        String email = data(get("/api/v1/auth/me", token)).get("email").asText();
+        changePlan("MONTHLY", LocalDateTime.now(java.time.ZoneOffset.UTC).plusDays(2));
+
+        reminderJob.run();
+        reminderJob.run();
+
+        String search = "http://localhost:" + MAILPIT.getMappedPort(8025) + "/api/v1/search?query="
+                + java.net.URLEncoder.encode("to:" + email, StandardCharsets.UTF_8);
+        JsonNode found = json.readTree(http.send(HttpRequest.newBuilder(URI.create(search)).GET().build(),
+                HttpResponse.BodyHandlers.ofString()).body());
+        assertThat(found.get("messages_count").asInt()).isEqualTo(1);
+        assertThat(found.get("messages").get(0).get("Subject").asText()).startsWith("Your Monthly plan renews on");
+    }
+
+    private static String hmac(String data, String secret) throws Exception {
+        javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+        mac.init(new javax.crypto.spec.SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        return java.util.HexFormat.of().formatHex(mac.doFinal(data.getBytes(StandardCharsets.UTF_8)));
     }
 
     private JsonNode changePlan(String plan) throws Exception {

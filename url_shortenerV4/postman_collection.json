@@ -60,6 +60,14 @@
     {
       "key": "rangeEnd",
       "value": ""
+    },
+    {
+      "key": "paymentsEnabled",
+      "value": ""
+    },
+    {
+      "key": "orderId",
+      "value": ""
     }
   ],
   "item": [
@@ -1676,7 +1684,268 @@
       ]
     },
     {
-      "name": "8. Cleanup",
+      "name": "8. Payments",
+      "description": "Razorpay payments. Works with or without Razorpay keys on the backend: without them, prices still load and\ncreating an order answers 503 \"not set up\". A real payment needs the Razorpay Checkout window in a browser\n(see docs/razorpay-setup.md); here only the server-side checks are exercised.",
+      "item": [
+        {
+          "name": "Prices (public)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Monthly ₹99 and Yearly ₹999, in paise', () => {",
+                  "  const d = pm.response.json().data;",
+                  "  const by = Object.fromEntries(d.plans.map((p) => [p.plan, p]));",
+                  "  pm.expect(by.MONTHLY.amountPaise).to.eql(9900);",
+                  "  pm.expect(by.MONTHLY.period).to.eql('month');",
+                  "  pm.expect(by.YEARLY.amountPaise).to.eql(99900);",
+                  "  pm.expect(by.YEARLY.currency).to.eql('INR');",
+                  "  pm.collectionVariables.set('paymentsEnabled', String(d.paymentsEnabled));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/billing/prices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing",
+                "prices"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create a Monthly order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('paymentsEnabled') === 'true') {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Order carries the server price and the public key id', () => {",
+                  "    const d = pm.response.json().data;",
+                  "    pm.expect(d.amountPaise).to.eql(9900);",
+                  "    pm.expect(d.keyId).to.match(/^rzp_/);",
+                  "    pm.collectionVariables.set('orderId', d.orderId);",
+                  "  });",
+                  "} else {",
+                  "  pm.test('Payments not set up: 503', () => pm.response.to.have.status(503));",
+                  "  pm.collectionVariables.set('orderId', 'order_none');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/billing/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing",
+                "orders"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": \"MONTHLY\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Confirm with a forged signature (expect 400, or 404 without an order)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Rejected', () => pm.expect(pm.response.code).to.be.oneOf([400, 404]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/billing/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"razorpay_order_id\": \"{{orderId}}\",\n  \"razorpay_payment_id\": \"pay_forged\",\n  \"razorpay_signature\": \"not-a-real-signature\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Plan unchanged after the forged confirmation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Still Free (lapsed Monthly from the grace-period requests)', () => pm.expect(pm.response.json().data.effectivePlan).to.eql('FREE'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/account/plan",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "account",
+                "plan"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Payment history",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('No completed payments', () => {",
+                  "  const list = pm.response.json().data;",
+                  "  pm.expect(list).to.be.an('array');",
+                  "  pm.expect(list.filter((p) => p.status === 'PAID')).to.have.length(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwtToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/billing/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing",
+                "payments"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Webhook with a bad signature (expect 400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Razorpay-Signature",
+                "value": "not-a-real-signature"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/billing/webhook",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing",
+                "webhook"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"payment.captured\",\n  \"payload\": {\n    \"payment\": {\n      \"entity\": {\n        \"id\": \"pay_forged\",\n        \"order_id\": \"{{orderId}}\",\n        \"amount\": 9900\n      }\n    }\n  }\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Cleanup",
       "item": [
         {
           "name": "Delete URL",

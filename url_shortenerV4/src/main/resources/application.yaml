@@ -54,6 +54,18 @@ spring:
   # POLYGLOT PERSISTENCE: Kafka (Analytics Event Streaming)
   # Producer, consumer and retry settings are in KafkaConfig.
   # ============================================================
+  # Outgoing email (payment reminders). Defaults to Mailpit, which catches
+  # everything locally (web UI on http://localhost:8025).
+  mail:
+    host: ${SPRING_MAIL_HOST:localhost}
+    port: ${SPRING_MAIL_PORT:1025}
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
+    properties:
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000
+
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 
@@ -88,6 +100,20 @@ app:
     slow-call: 2s
     redis-slow-call: 300ms
     kafka-slow-call: 500ms
+  # Payments through Razorpay. Off until the key id and secret are set; see
+  # docs/razorpay-setup.md. Prices are in paise (Rs 99 = 9900).
+  billing:
+    monthly-price-paise: ${BILLING_MONTHLY_PRICE_PAISE:9900}
+    yearly-price-paise: ${BILLING_YEARLY_PRICE_PAISE:99900}
+    razorpay:
+      key-id: ${RAZORPAY_KEY_ID:}
+      key-secret: ${RAZORPAY_KEY_SECRET:}
+      webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+    # Payment reminder emails, once a day.
+    reminders:
+      cron: ${BILLING_REMINDERS_CRON:0 0 9 * * *}
+  mail:
+    from: ${MAIL_FROM:ShortLink <no-reply@shortlink.local>}
   # Sign in with Google / GitHub. A provider is enabled only when both its id
   # and secret are set; see docs/oauth-setup.md for how to get them.
   oauth:
@@ -140,6 +166,10 @@ management:
   metrics:
     tags:
       application: url-shortener
+  # Reminder emails are retried the next day, so a mail outage should not mark the app DOWN.
+  health:
+    mail:
+      enabled: false
 
 # ============================================================
 # POLYGLOT PERSISTENCE: DynamoDB Configuration

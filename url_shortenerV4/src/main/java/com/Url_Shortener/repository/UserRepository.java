@@ -21,6 +21,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     Optional<User> findByEmailIgnoreCase(String email);
 
+    /** Users on these plans whose paid period ends in the given range; for payment reminders. */
+    java.util.List<User> findByPlanInAndPlanPeriodEndBetween(java.util.Collection<com.Url_Shortener.plan.Plan> plans,
+                                                             LocalDateTime from, LocalDateTime to);
+
     User save(User user);
 
     /**

@@ -140,6 +140,18 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      SPRING_MAIL_HOST: ${SPRING_MAIL_HOST:-mailpit}
+      SPRING_MAIL_PORT: ${SPRING_MAIL_PORT:-1025}
+      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-ShortLink <no-reply@shortlink.local>}
+      BILLING_MONTHLY_PRICE_PAISE: ${BILLING_MONTHLY_PRICE_PAISE:-9900}
+      BILLING_YEARLY_PRICE_PAISE: ${BILLING_YEARLY_PRICE_PAISE:-99900}
+      BILLING_REMINDERS_CRON: ${BILLING_REMINDERS_CRON:-0 0 9 * * *}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:4200}
       DYNAMODB_ENDPOINT: ${DYNAMODB_ENDPOINT}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
@@ -148,6 +160,16 @@ services:
       SPRING_DATA_REDIS_PORT: "6379"
       SPRING_MONGODB_URI: mongodb://mongodb:27017/urlshortener
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+
+  # Catches every email the app sends (payment reminders) for local testing.
+  # Web UI: http://localhost:8025. Point SPRING_MAIL_* at a real SMTP server instead in production.
+  mailpit:
+    image: axllent/mailpit:v1.20.4
+    container_name: url-shortener-mailpit
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
+      - "1025:1025"
 
   redis-exporter:
     image: oliver006/redis_exporter:v1.62.0

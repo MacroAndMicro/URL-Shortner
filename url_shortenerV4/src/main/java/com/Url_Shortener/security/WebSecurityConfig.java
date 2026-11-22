@@ -77,6 +77,9 @@ public class WebSecurityConfig {
                         .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
                         .requestMatchers("/api/v1/health").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/guest/shorten").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/billing/prices").permitAll()
+                        // Razorpay calls this; BillingService checks its signature.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/billing/webhook").permitAll()
                         // Actuator is served on management.server.port, which is not published.
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/api/v1/**").authenticated()
