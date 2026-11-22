@@ -52,6 +52,27 @@ export class AuthService {
     );
   }
 
+  /** Sign-in providers the backend has set up, e.g. ['google', 'github']. */
+  getOAuthProviders(): Observable<ApiResponse<string[]>> {
+    return this.http.get<ApiResponse<string[]>>(`${this.baseUrl}/public/oauth/providers`);
+  }
+
+  /** Where the browser goes to sign in with a provider; the backend takes it from there. */
+  oauthStartUrl(provider: string): string {
+    return `${environment.apiUrl}/oauth2/authorization/${provider}`;
+  }
+
+  /** Exchanges the one-time code from a Google/GitHub sign-in for tokens, and signs in. */
+  exchangeOAuthCode(code: string): Observable<ApiResponse<LoginResponse>> {
+    return this.http.post<ApiResponse<LoginResponse>>(`${this.baseUrl}/public/oauth/exchange`, { code }).pipe(
+      tap((res) => {
+        this.storage.setToken(res.data.token);
+        this.storage.setRefreshToken(res.data.refreshToken);
+        this.isAuthenticated.set(true);
+      })
+    );
+  }
+
   refreshToken(): Observable<ApiResponse<LoginResponse>> {
     const refreshToken = this.storage.getRefreshToken();
     const request: RefreshRequest = { refreshToken: refreshToken ?? '' };

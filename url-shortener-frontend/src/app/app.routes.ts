@@ -7,6 +7,7 @@ import { CreateUrlPageComponent } from './features/urls/create-url-page.componen
 import { MyUrlsPageComponent } from './features/urls/my-urls-page.component';
 import { AnalyticsPageComponent } from './features/analytics/analytics-page.component';
 import { PlanPageComponent } from './features/plan/plan-page.component';
+import { OAuthCallbackPageComponent } from './features/auth/oauth-callback-page.component';
 import { authGuard, guestGuard } from './core/guards/auth.guard';
 
 export const routes: Routes = [
@@ -18,6 +19,7 @@ export const routes: Routes = [
   { path: 'urls', component: MyUrlsPageComponent, canActivate: [authGuard] },
   { path: 'analytics/:shortUrl', component: AnalyticsPageComponent, canActivate: [authGuard] },
   { path: 'plan', component: PlanPageComponent, canActivate: [authGuard] },
+  { path: 'auth/callback', component: OAuthCallbackPageComponent },
   { path: '**', redirectTo: '' },
 ];
 

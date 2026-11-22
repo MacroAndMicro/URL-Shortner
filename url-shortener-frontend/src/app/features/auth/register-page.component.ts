@@ -2,15 +2,17 @@ import { Component, inject } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { AuthService } from '../../core/services/auth.service';
+import { SocialSignInComponent } from '../../shared/components/social-sign-in.component';
 
 @Component({
   selector: 'app-register-page',
   standalone: true,
-  imports: [RouterLink, ReactiveFormsModule],
+  imports: [RouterLink, ReactiveFormsModule, SocialSignInComponent],
   template: `
     <div class="section py-16">
       <div class="card-elevated max-w-md mx-auto">
         <h1 class="text-h2 mb-6 text-navy-900 dark:text-white">Create your account</h1>
+        <app-social-sign-in separator="sign up with email" />
         <form [formGroup]="form" (ngSubmit)="onSubmit()" class="space-y-4">
           <div>
             <label for="username" class="block text-sm font-semibold text-navy-900 dark:text-white mb-1.5">Username</label>

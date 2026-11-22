@@ -2,15 +2,20 @@ import { Component, inject } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { AuthService } from '../../core/services/auth.service';
+import { SocialSignInComponent } from '../../shared/components/social-sign-in.component';
 
 @Component({
   selector: 'app-login-page',
   standalone: true,
-  imports: [RouterLink, ReactiveFormsModule],
+  imports: [RouterLink, ReactiveFormsModule, SocialSignInComponent],
   template: `
     <div class="section py-16">
       <div class="card-elevated max-w-md mx-auto">
         <h1 class="text-h2 mb-6 text-navy-900 dark:text-white">Sign in</h1>
+        @if (oauthError) {
+          <p class="alert-error mb-5" role="alert">{{ oauthError }}</p>
+        }
+        <app-social-sign-in />
         <form [formGroup]="form" (ngSubmit)="onSubmit()" class="space-y-4">
           <div>
             <label for="username" class="block text-sm font-semibold text-navy-900 dark:text-white mb-1.5">Username</label>
@@ -35,6 +40,8 @@ import { AuthService } from '../../core/services/auth.service';
   `,
 })
 export class LoginPageComponent {
+  /** Set when a Google/GitHub sign-in sent the user back here. */
+  oauthError = oauthErrorMessage(new URLSearchParams(location.search).get('oauthError'));
   private readonly fb = inject(FormBuilder);
   auth = inject(AuthService);
   private readonly router = inject(Router);
@@ -49,5 +56,13 @@ export class LoginPageComponent {
     this.auth.login(this.form.value).subscribe({
       next: () => this.router.navigate(['/dashboard']),
     });
+  }
+}
+
+function oauthErrorMessage(reason: string | null): string | null {
+  switch (reason) {
+    case null: return null;
+    case 'unavailable': return 'Sign-in is temporarily unavailable. Please try again in a moment.';
+    default: return 'Signing in with that account did not work. Please try again or use your username.';
   }
 }
